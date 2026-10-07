@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GENERATORS, UPGRADES, createState, applyAction, settle, getStats, priceFor, MAX_OFFLINE_MS } from '../shared/economy.mjs';
+import { GENERATORS, UPGRADES, createState, applyAction, settle, getStats, priceFor, MAX_OFFLINE_MS, PRESTIGE_PRICE } from '../shared/economy.mjs';
 
 test('first generator has reachable price and production; bulk prices compound',()=>{
   const s=createState(0);applyAction(s,{type:'click',amount:15},0);assert.equal(s.balance,15);
@@ -32,11 +32,20 @@ test('upgrades enforce unlock, affordability and uniqueness',()=>{
 test('prestige is earned per run, resets purchased production and preserves lifetime totals',()=>{
   const s=createState(0);
   assert.throws(()=>applyAction(s,{type:'prestige'},0),{code:'prestige_locked'});
-  s.runEarned=1000000;s.totalEarned=1500000;s.balance=2000;s.generators[0]=10;s.upgrades=['click-1'];
+  s.runEarned=1000000;s.totalEarned=1500000;s.balance=PRESTIGE_PRICE;s.generators[0]=10;s.upgrades=['click-1'];
   applyAction(s,{type:'prestige'},0);
   assert.equal(s.prestige,1);assert.equal(s.prestigeCount,1);assert.equal(s.totalEarned,1500000);assert.equal(s.runEarned,0);
   assert.equal(s.balance,0);assert.deepEqual(s.generators,GENERATORS.map(()=>0));assert.deepEqual(s.upgrades,[]);
   assert.equal(getStats(s).multiplier,1.1);assert.equal(getStats(s).clickPower,1.1);
+});
+test('prestige requires its exact price in spendable balance, independently of historical earnings',()=>{
+  const s=createState(0);s.runEarned=1e20;s.totalEarned=1e20;s.balance=PRESTIGE_PRICE-1;s.clicks=500;s.generators[0]=4;
+  assert.equal(PRESTIGE_PRICE,999_999_999_999_999);
+  assert.throws(()=>applyAction(s,{type:'prestige'},0),error=>error.code==='prestige_locked'&&error.message.includes('999 999 999 999 999'));
+  assert.equal(s.balance,PRESTIGE_PRICE-1);assert.equal(s.prestigeCount,0);assert.equal(s.generators[0],4);
+  s.balance=PRESTIGE_PRICE;const gain=getStats(s).prestigeGain;
+  applyAction(s,{type:'prestige'},0);
+  assert.equal(s.balance,0);assert.equal(s.prestige,gain);assert.equal(s.prestigeCount,1);assert.equal(s.clicks,500);assert.equal(s.totalEarned,1e20);
 });
 test('golden reward can only be claimed once in its server window',()=>{
   const s=createState(0);s.golden={nextAt:100000,availableUntil:0};

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ACHIEVEMENTS,COSMETICS,collectAchievements,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors } from '../shared/achievements.mjs';
-import { createState,applyAction,settle,getStats } from '../shared/economy.mjs';
+import { createState,applyAction,settle,getStats,PRESTIGE_PRICE } from '../shared/economy.mjs';
 
 test('achievement catalog has 86 unique, meaningful milestones and keeps all original IDs',()=>{
   assert.equal(ACHIEVEMENTS.length,86);assert.equal(new Set(ACHIEVEMENTS.map(a=>a.id)).size,86);
@@ -22,7 +22,7 @@ test('unlocking cosmetics and achievements never changes balances or production'
 });
 
 test('all stage milestones, peak rates, and upgrades survive a prestige reset',()=>{
-  const state=createState(0);state.generators=state.generators.map(()=>100);state.upgrades=['click-1','click-2','click-3'];state.runEarned=1e6;state.totalEarned=1e6;
+  const state=createState(0);state.generators=state.generators.map(()=>100);state.upgrades=['click-1','click-2','click-3'];state.runEarned=1e6;state.totalEarned=1e6;state.balance=PRESTIGE_PRICE;
   const peak=getStats(state).cps;collectAchievements(state,getStats(state));
   assert.ok(state.achievements.includes('stage-multiverse-100'));assert.ok(state.achievements.includes('research'));assert.equal(cosmeticUnlocked(state,'jade'),true);
   applyAction(state,{type:'prestige'},0);
@@ -45,9 +45,9 @@ test('legacy saves migrate without dropping existing badges or changing game dat
 });
 
 test('each legitimate prestige awards its own badge, independently of points gained',()=>{
-  const state=createState(0);state.runEarned=4e6;state.totalEarned=4e6;
+  const state=createState(0);state.runEarned=4e6;state.totalEarned=4e6;state.balance=PRESTIGE_PRICE;
   applyAction(state,{type:'prestige'},0);assert.equal(state.prestige,2);assert.equal(state.prestigeCount,1);assert.ok(state.achievements.includes('prestige:1'));assert.ok(!state.achievements.includes('prestige:2'));
-  state.runEarned=1e6;state.totalEarned+=1e6;applyAction(state,{type:'prestige'},0);
+  state.runEarned=1e6;state.totalEarned+=1e6;state.balance=PRESTIGE_PRICE;applyAction(state,{type:'prestige'},0);
   assert.equal(state.prestigeCount,2);assert.ok(state.achievements.includes('prestige:2'));assert.ok(state.achievements.includes('prestige-runs-2'));
 });
 

@@ -1,13 +1,19 @@
+export const WORLD_EVENTS=Object.freeze([
+  {id:'school-olympiad',source:'world',generatorId:'abacus',name:'Школьная олимпиада',description:'Команда школьников готова к задачам со звёздочкой.',rules:'Три задачи: скобки, дробь и неизвестное. Выбери правильный ответ в каждой.',kind:'quiz',durationSec:90,rewardClicks:90,penaltyClicks:25,cooldownSec:300},
+  {id:'portal-meteors',source:'world',generatorId:'dimension',name:'Метеорный поток',description:'Портал принёс шесть отметок космической обсерватории.',rules:'Расположи время появления шести метеоров по возрастанию, от самого раннего к позднему.',kind:'sort',durationSec:60,rewardClicks:600,penaltyClicks:90,cooldownSec:300},
+  {id:'academic-discovery',source:'world',generatorId:'quantum',name:'Академическое открытие',description:'Профессор проверяет новую гипотезу об интегралах.',rules:'Три вопроса о площади, первообразной и постоянной интегрирования. Подтверди все три вывода.',kind:'quiz',durationSec:75,rewardClicks:320,penaltyClicks:60,cooldownSec:300},
+]);
 export const EVENTS = Object.freeze([
   {id:'school',generatorId:'abacus',name:'Контрольная',description:'Помоги школьнику решить три примера.',rules:'Три вопроса. Выбери правильный ответ в каждом.',kind:'quiz',durationSec:60,rewardClicks:40,penaltyClicks:10,cooldownSec:300},
   {id:'student',generatorId:'calculator',name:'Сессия',description:'Три производные до звонка.',rules:'Выбери производную каждой функции.',kind:'quiz',durationSec:45,rewardClicks:60,penaltyClicks:15,cooldownSec:300},
   {id:'teacher',generatorId:'algorithm',name:'Проверка работ',description:'Найди ошибки в чужих решениях.',rules:'В каждом вопросе укажи неверное равенство.',kind:'quiz',durationSec:35,rewardClicks:90,penaltyClicks:20,cooldownSec:300},
-  {id:'computer',generatorId:'neuron',name:'Двоичный код',description:'Переведи сообщения компьютера.',rules:'Переведи три двоичных числа в десятичные.',kind:'quiz',durationSec:30,rewardClicks:120,penaltyClicks:25,cooldownSec:300},
+  {id:'computer',generatorId:'neuron',name:'Двоичный код',description:'Переведи сообщения компьютера.',rules:'Переведи три двоичных числа в десятичные.',kind:'quiz',durationSec:90,rewardClicks:120,penaltyClicks:25,cooldownSec:300},
   {id:'professor',generatorId:'quantum',name:'Научный семинар',description:'Подбери первообразные многочленов.',rules:'Выбери неопределённый интеграл каждого выражения.',kind:'quiz',durationSec:45,rewardClicks:180,penaltyClicks:40,cooldownSec:300},
   {id:'ai',generatorId:'singularity',name:'Обучение модели',description:'Найди закономерности в последовательностях.',rules:'Выбери следующее число в каждом ряду.',kind:'quiz',durationSec:30,rewardClicks:240,penaltyClicks:50,cooldownSec:300},
   {id:'portal',generatorId:'dimension',name:'Обратный сигнал',description:'Сохрани код, проходящий через портал.',rules:'Запомни четыре цифры за 5 секунд. Введи их в обратном порядке.',kind:'reverse',durationSec:30,rewardClicks:360,penaltyClicks:75,cooldownSec:300},
   {id:'time',generatorId:'universe',name:'Хронология',description:'Верни числа на правильную временную линию.',rules:'Расположи шесть чисел по возрастанию.',kind:'sort',durationSec:45,rewardClicks:480,penaltyClicks:100,cooldownSec:300},
   {id:'thought',generatorId:'multiverse',name:'Главный вопрос',description:'Проверь логику Глубокой мысли.',rules:'Три логические задачи. Нужны три верных ответа.',kind:'quiz',durationSec:35,rewardClicks:720,penaltyClicks:150,cooldownSec:300},
+  ...WORLD_EVENTS,
 ]);
 const GENERATOR_IDS=['autoclick','abacus','calculator','algorithm','neuron','quantum','singularity','dimension','universe','multiverse'];
 const randomInt=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
@@ -20,6 +26,16 @@ function choice(prompt,answer,alternatives){
 }
 function question(kind,index){
   const a=randomInt(2,12),b=randomInt(2,9);
+  if(kind==='school-olympiad'){
+    if(index===0)return choice(`${a} × (${b} + 2) = ?`,a*(b+2),[a*b+2,a+b+2,a*b*2]);
+    if(index===1)return choice(`(${a*b} + ${b*2}) / ${b} = ?`,a+2,[a+b,a*2,a-1]);
+    return choice(`Найди x: ${a}x + ${b} = ${a*3+b}`,3,[2,4,5]);
+  }
+  if(kind==='academic-discovery'){
+    if(index===0)return choice(`Площадь под графиком y = ${2*a}x на отрезке [0; 1] равна…`,a,[2*a,a+1,a-1]);
+    if(index===1)return choice(`Какая функция является первообразной для ${2*a}x?`,`${a}x² + C`,[`${2*a}x + C`,`${a}x + C`,`${2*a}x² + C`]);
+    return choice('Чем могут отличаться две первообразные одной функции на одном интервале?','Постоянным слагаемым',['Произвольным множителем','Знаком производной','Любой функцией x']);
+  }
   if(kind==='school'){
     const result=index===0?a+b:index===1?a*b:a+b-b;
     const prompt=index===0?`${a} + ${b} = ?`:index===1?`${a} × ${b} = ?`:`${a+b} − ${b} = ?`;
@@ -73,7 +89,8 @@ export function startEvent(state,eventId,stats,now=Date.now()){
   }else if(definition.kind==='reverse'){
     const digits=String(randomInt(1000,9999));data={digits,memorizeUntil:now+5000};prompts=[{prompt:'Введи четыре цифры в обратном порядке.'}];answers=[digits.split('').reverse().join('')];
   }else{
-    const numbers=new Set();while(numbers.size<6)numbers.add(randomInt(1,99));data={numbers:shuffle([...numbers])};prompts=[{prompt:'Расположи числа по возрастанию.'}];answers=[...numbers].sort((a,b)=>a-b);
+    const meteors=eventId==='portal-meteors';
+    const numbers=new Set();while(numbers.size<6)numbers.add(randomInt(1,meteors?360:99));data={numbers:shuffle([...numbers])};prompts=[{prompt:meteors?'Расставь отметки появления метеоров по времени, от ранней к поздней (секунды).':'Расположи числа по возрастанию.'}];answers=[...numbers].sort((a,b)=>a-b);
   }
   const event={id:globalThis.crypto.randomUUID(),eventId,kind:definition.kind,name:definition.name,startedAt:now,deadline:now+definition.durationSec*1000,reward:Math.max(definition.rewardClicks*stats.clickPower,stats.cps*30),penalty:definition.penaltyClicks*stats.clickPower,prompts,data,_answers:answers};
   state.activeEvent=event;state.eventCooldowns||={};state.eventCooldowns[eventId]=now+definition.cooldownSec*1000;state.eventStats||={wins:0,losses:0};return event;

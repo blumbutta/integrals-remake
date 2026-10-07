@@ -4,6 +4,7 @@ import { collectAchievements as unlockAchievements } from './achievements.mjs';
 export const MAX_OFFLINE_MS = 12 * 60 * 60 * 1000;
 export const ACTIVE_GRACE_MS = 30_000;
 export const GOLDEN_WINDOW_MS = 15_000;
+export const PRESTIGE_PRICE = 999_999_999_999_999;
 export const GENERATORS = Object.freeze([
   {id:'autoclick',name:'Автоклик',description:'Первый шаг к бесконечности.',basePrice:15,baseCps:0.25,icon:'⌁'},
   {id:'abacus',name:'Школьник',description:'Начинает с простых задач и не сдаётся.',basePrice:125,baseCps:2,icon:'⠿'},
@@ -101,6 +102,7 @@ export function applyAction(state,action,now=Date.now()) {
   }
   if(action.type==='prestige'){
     if(state.activeEvent)fail('event_active','Заверши испытание перед перерождением.');
+    if(state.balance<PRESTIGE_PRICE)fail('prestige_locked','Для перерождения нужно 999 999 999 999 999 интегралов на балансе.');
     const gain=getStats(state).prestigeGain;
     if(gain<1)fail('prestige_locked','Для первого престижа нужен миллион интегралов за цикл.');
     state.prestige+=gain;state.prestigeCount++;

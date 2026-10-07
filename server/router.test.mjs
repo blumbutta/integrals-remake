@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createIntegralsHandler } from './router.mjs';
+import { PRESTIGE_PRICE } from '../shared/economy.mjs';
 
 async function fixture(options={}){
   const dir=mkdtempSync(join(tmpdir(),'integrals-test-'));let time=1_000_000;
@@ -146,5 +147,19 @@ test('event API keeps answers private, enforces unlock and scores only the serve
     assert.equal((await f.request(p+'/action','POST',answer,token)).data.player.totalEarned,event.reward);
     assert.equal((await f.request(p+'/action','POST',{...answer,id:actionId(33)},token)).data.error.code,'event_unavailable');
     db.close();
+  }finally{await f.close();}
+});
+test('server prestige rejects historical wealth without current funds and accepts the exact price',async()=>{
+  const f=await fixture();try{
+    const {data:{token}}=await f.request(p+'/players','POST',{});
+    const db=new DatabaseSync(f.dbPath),row=db.prepare('SELECT * FROM integrals_players').get(),state=JSON.parse(row.state);
+    state.runEarned=1e18;state.totalEarned=1e18;state.balance=PRESTIGE_PRICE-1;
+    db.prepare('UPDATE integrals_players SET state=? WHERE id=?').run(JSON.stringify(state),row.id);
+    const denied=await f.request(p+'/action','POST',{id:actionId(40),type:'prestige'},token);
+    assert.equal(denied.status,400);assert.equal(denied.data.error.code,'prestige_locked');
+    assert.equal(JSON.parse(db.prepare('SELECT state FROM integrals_players WHERE id=?').get(row.id).state).prestigeCount,0);
+    state.balance=PRESTIGE_PRICE;db.prepare('UPDATE integrals_players SET state=? WHERE id=?').run(JSON.stringify(state),row.id);
+    const accepted=await f.request(p+'/action','POST',{id:actionId(41),type:'prestige'},token);
+    assert.equal(accepted.status,200);assert.equal(accepted.data.player.balance,0);assert.equal(accepted.data.player.totalEarned,1e18);assert.equal(accepted.data.player.prestigeCount,1);db.close();
   }finally{await f.close();}
 });

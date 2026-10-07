@@ -1,4 +1,4 @@
-import {GENERATORS, UPGRADES, createState, settle, applyAction, getStats, priceFor} from './shared/economy.mjs';
+import {GENERATORS, UPGRADES, PRESTIGE_PRICE, createState, settle, applyAction, getStats, priceFor} from './shared/economy.mjs';
 import {EVENTS,eventAvailable,getPublicEvent} from './shared/events.mjs';
 import {createMusicPlayer} from './music.mjs';
 import {ACHIEVEMENTS,COSMETICS,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors} from './shared/achievements.mjs';
@@ -6,10 +6,12 @@ import {formatNumber as fmt} from './format.mjs';
 import {createClickEffects} from './effects.mjs';
 import {createLabWorld} from './world.mjs';
 import {researchArtwork} from './research-art.mjs';
+import {achievementArtwork} from './achievement-art.mjs';
+import {createPrestigeAudio} from './prestige-audio.mjs';
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
-const music=createMusicPlayer();
+const music=createMusicPlayer(),prestigeAudio=createPrestigeAudio();
 const actionWaiters=new Map();
 const STORAGE='integrals-remake-v1', TOKEN_KEY='integrals-remake-token';
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
@@ -25,6 +27,7 @@ if(navigator.locks){readOnlyTab=!(await new Promise(resolve=>{navigator.locks.re
 let token=readStorage(TOKEN_KEY)||null;
 let state=createState(),mode=token?'cloud':'local',connected=false,quantity=1,currentPage='lab',busy=false,baseTime=Date.now(),clockOffset=0,pending=[],clickBuffer=0;
 let nickname='Исследователь',listed=true,sound=Boolean(saved?.sound),earnedAchievements=new Set(saved?.achievements||[]);
+let cinematicActive=false,cinematicSound=saved?.cinematicSound!==false,resumeMusicAfterVisibility=false,achievementFilter='all',worldLocation=null;
 let localOffline=0,selectedCosmetic=typeof saved?.selectedCosmetic==='string'?saved.selectedCosmetic:'classic',worldPaused=Boolean(saved?.worldPaused),appearance,prestigePage=0,achievementNoticesReady=false;
 let musicVolume=typeof saved?.musicVolume==='number'?saved.musicVolume:35;music.setVolume(musicVolume/100);
 if(saved?.state){try{state=validateState(saved.state);nickname=typeof saved.nickname==='string'?saved.nickname.slice(0,24):nickname;listed=saved.listed!==false;if(mode==='local'){localOffline=settle(state).offlineEarned;state.lastSeen=Date.now();}}catch{}}
@@ -60,7 +63,7 @@ function validateState(raw,requirePrivateEvent=false){
 }
 function save(){
   if(readOnlyTab)return;
-  writeStorage(STORAGE,JSON.stringify({version:1,state,nickname,listed,sound,musicVolume,selectedCosmetic,worldPaused,achievements:[...earnedAchievements],pending:mode==='cloud'?pending:[],mode}));
+  writeStorage(STORAGE,JSON.stringify({version:1,state,nickname,listed,sound,musicVolume,selectedCosmetic,worldPaused,cinematicSound,achievements:[...earnedAchievements],pending:mode==='cloud'?pending:[],mode}));
 }
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,4200);}
 function setStatus(text,kind='local'){$('#save-status').innerHTML=`<i></i>${esc(text)}`;$('#save-status').className=`save-status ${kind}`;}
@@ -122,7 +125,7 @@ async function performFlush(){
   queueClicks();busy=true;const flushEpoch=sessionEpoch;
   try{
     while(pending.length){const action=pending[0];setStatus('Сохраняем…','syncing');
-      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;pending.shift();acceptPlayer(data.player);actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
+      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;pending.shift();const delayedPrestige=action.type==='prestige'&&!actionWaiters.has(action.id);if(delayedPrestige){selectedCosmetic='prestige';prestigePage=Math.floor((data.player.prestigeCount-1)/8);}acceptPlayer(data.player);if(delayedPrestige)toast('Перерождение подтверждено сервером. Новый облик добавлен в награды.');actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
       catch(error){
         if(flushEpoch!==sessionEpoch)return;
         if(error.status>=400&&error.status<500&&error.status!==429){pending.shift();save();actionWaiters.get(action.id)?.(false);actionWaiters.delete(action.id);toast(error.message);continue;}
@@ -134,6 +137,7 @@ async function performFlush(){
   finally{if(flushEpoch!==sessionEpoch)return;busy=false;if(!connected){for(const resolve of actionWaiters.values())resolve(false);actionWaiters.clear();}render();}
 }
 async function act(action){
+  if(cinematicActive&&action.type!=='prestige'){toast('Дождитесь рождения нового мира');return false;}
   if(readOnlyTab){toast('Продолжите игру в первой вкладке');return false;}if(transitioning){toast('Подключаем лабораторию…');return false;}
   if(mode==='cloud'){
     if(!connected){toast('Дождитесь соединения с сервером');return false;}
@@ -147,13 +151,14 @@ function blip(kind='click'){
   try{audio??=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();const osc=audio.createOscillator(),gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.type='sine';osc.frequency.setValueAtTime(kind==='buy'?660:400+Math.random()*160,audio.currentTime);osc.frequency.exponentialRampToValueAtTime(kind==='buy'?990:280,audio.currentTime+.07);gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.1);osc.start();osc.stop(audio.currentTime+.11);}catch{}
 }
 function clickIntegral(event){
+  if(cinematicActive)return;
   if(readOnlyTab){toast('Продолжите игру в первой вкладке');return;}if(transitioning){toast('Подключаем лабораторию…');return;}
   if(mode==='cloud'&&!connected){toast('Восстанавливаем соединение с облаком…');return;}
   const now=performance.now();clickCredit=Math.min(24,clickCredit+(now-lastClickTime)*.012);lastClickTime=now;if(clickCredit<1)return;clickCredit--;
   const power=getStats(projected()).clickPower;
   if(mode==='cloud'){if(clickBuffer>=24)return;clickBuffer++;}
   else{applyAction(state,{type:'click',amount:1});state.lastSeen=Date.now();save();}
-  if(event?.detail>0){clickEffects.manualClick();world.burst();}
+  clickEffects.manualClick();world.burst();
   const stage=$('#integral-stage'),r=stage.getBoundingClientRect(),p=document.createElement('span');p.className='click-float';p.textContent=`+${fmt(power)}`;p.style.left=`${event?.clientX?event.clientX-r.left:r.width/2+(Math.random()-.5)*60}px`;p.style.top=`${event?.clientY?event.clientY-r.top:r.height*.45}px`;$('#click-particles').append(p);setTimeout(()=>p.remove(),900);$('#integral-button').classList.remove('clicked');void $('#integral-button').offsetWidth;$('#integral-button').classList.add('clicked');blip();render();
 }
 $('#integral-button').addEventListener('click',clickIntegral);
@@ -166,9 +171,9 @@ function render(force=false){
   $('#balance').textContent=fmt(s.balance);$('#balance').title=fmt(s.balance,2);$('#balance').style.fontSize=`${Math.max(22,Math.min(56,440/Math.max(8,fmt(s.balance).length)))}px`;$('#cps').textContent=fmt(stats.cps,2);$('#click-power').textContent=`+${fmt(stats.clickPower)}`;$('#total-earned').textContent=fmt(s.totalEarned);$('#total-clicks').textContent=fmt(s.clicks);$('#multiplier').textContent=`×${fmt(stats.multiplier,2)}`;
   $('#profile-name').textContent=nickname;$('#prestige-badge').textContent=fmt(s.prestige);$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#prestige-total').textContent=fmt(s.prestige,0);$('#upgrade-count').textContent=s.upgrades.length;
   $('#era-label').textContent=s.totalEarned>=1e9?'ЭПОХА IV · ЗА ГРАНЬЮ БЕСКОНЕЧНОСТИ':s.totalEarned>=1e6?'ЭПОХА III · ЕДИНАЯ ТЕОРИЯ':s.totalEarned>=1000?'ЭПОХА II · БОЛЬШИЕ ОТКРЫТИЯ':'ЭПОХА I · ПЕРВЫЙ ПРИНЦИП';
-  const nextIndex=s.generators.findIndex(v=>v===0),goal=nextIndex===-1?1e6:GENERATORS[nextIndex].basePrice,value=nextIndex===-1?s.runEarned:s.balance;
+  const nextIndex=s.generators.findIndex(v=>v===0),goal=nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance;
   $('#goal-text').textContent=nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':GENERATORS[nextIndex].name;
-  $('#goal-progress').textContent=`${fmt(Math.min(value,goal))} / ${fmt(goal)}`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
+  $('#goal-progress').textContent=value>=goal?'Можно открыть':`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
   const now=Date.now()+clockOffset;$('#golden-button').hidden=!(s.golden?.availableUntil>now&&s.golden?.nextAt<=now);
   const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),s.totalEarned>=g.basePrice*.4,quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>s.balance>=u.price),connected]);
   if(force||stamp!==lastShopStamp){lastShopStamp=stamp;renderShop(s);}
@@ -178,12 +183,15 @@ function render(force=false){
   for(const a of ACHIEVEMENTS)if(mode==='local'&&a.value(s,stats)>=a.target&&!earnedAchievements.has(a.id)){earnedAchievements.add(a.id);freshlyEarned.push(a.id);}
   if(mode==='local')state.achievements=[...earnedAchievements].filter(validAchievement);
   s.achievements=[...earnedAchievements];
-  if(achievementNoticesReady&&freshlyEarned.length){const first=ACHIEVEMENTS.find(a=>a.id===freshlyEarned[0]);toast(`Достижение: ${first?.name||'Новая бесконечность'}${freshlyEarned.length>1?` · ещё ${freshlyEarned.length-1}`:''}. Награды — во вкладке достижений.`);save();}
+  if(achievementNoticesReady&&freshlyEarned.length){const first=ACHIEVEMENTS.find(a=>a.id===freshlyEarned[0]);toast(`Достижение: ${first?.name||'Новая бесконечность'}${freshlyEarned.length>1?` · ещё ${freshlyEarned.length-1}`:''}. Оформления — во вкладке «Награды».`);save();}
   achievementNoticesReady=true;
-  applyAppearance(s);renderLabScene(s);clickEffects.update(s.generators[0]);
+  if(!cinematicActive)applyAppearance(s);renderLabScene(s);clickEffects.update(s.generators[0]);
   const regularCount=ACHIEVEMENTS.filter(a=>earnedAchievements.has(a.id)).length;
   $('#achievement-count').textContent=fmt(regularCount+s.prestigeCount,0);$('#achievement-summary').textContent=`${regularCount} / ${ACHIEVEMENTS.length} · ${fmt(s.prestigeCount,0)} супердостижений`;
+  $('#prestige-price').textContent=`${fmt(PRESTIGE_PRICE,0)} ∫`;$('#prestige-open').classList.toggle('affordable',s.balance>=PRESTIGE_PRICE);
   if(currentPage==='achievements')renderAchievements(s);
+  if(currentPage==='rewards')renderRewards(s);
+  if(currentPage==='world')renderWorldEvents(s);
   if(currentPage==='events')renderEvents(s);
   updateEventTimer();
   if(!storageAvailable){setStatus('Не сохранено','warning');$('#session-note').textContent='Браузер блокирует сохранение. Сделайте экспорт в профиле.';}
@@ -203,7 +211,15 @@ $('#generators-panel').addEventListener('click',async e=>{const b=e.target.close
 $('#upgrades-panel').addEventListener('click',async e=>{const b=e.target.closest('[data-upgrade]');if(b&&await act({type:'upgrade',itemId:b.dataset.upgrade}))blip('buy');});
 $$('[data-quantity]').forEach(b=>b.addEventListener('click',()=>{quantity=b.dataset.quantity==='max'?'max':Number(b.dataset.quantity);$$('[data-quantity]').forEach(n=>{n.classList.toggle('active',n===b);n.setAttribute('aria-pressed',String(n===b));});render(true);}));
 for(const tab of ['generators','upgrades'])$(`#tab-${tab}`).addEventListener('click',()=>{for(const t of ['generators','upgrades']){$(`#tab-${t}`).classList.toggle('active',t===tab);$(`#tab-${t}`).setAttribute('aria-selected',String(t===tab));$(`#${t}-panel`).hidden=t!==tab;}$('.quantity-switch').classList.toggle('research-mode',tab==='upgrades');});
-$$('[data-page]').forEach(b=>b.addEventListener('click',()=>{currentPage=b.dataset.page;$$('[data-page]').forEach(n=>n.classList.toggle('active',n===b));$$('.page-panel').forEach(p=>p.hidden=p.id!==`page-${currentPage}`);if(currentPage==='ranking')loadRanking();render(true);}));
+function showPage(page){
+  if(cinematicActive&&page!=='world')return;
+  if(!document.getElementById(`page-${page}`))return;
+  currentPage=page;$$('[data-page]').forEach(n=>{n.classList.toggle('active',n.dataset.page===page);n.setAttribute('aria-current',n.dataset.page===page?'page':'false');});
+  $$('.page-panel').forEach(p=>p.hidden=p.id!==`page-${page}`);
+  if(page==='ranking')loadRanking();render(true);
+  if(page==='world')world.resize();
+}
+$$('[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
 function selectedAppearance(s){
   const run=selectedCosmetic.startsWith('prestige:')?Number(selectedCosmetic.slice(9)):selectedCosmetic==='prestige'?s.prestigeCount:0;
   if(Number.isSafeInteger(run)&&run>0&&run<=s.prestigeCount)return prestigeAppearance(run);
@@ -215,15 +231,20 @@ function applyAppearance(s){
   document.body.dataset.theme=next.id;document.body.dataset.pattern=next.pattern;
   for(const [key,value]of Object.entries({'--accent':next.accent,'--cosmetic-glow':next.glow,'--theme-tint':next.tint,'--world-hue':next.hue,'--prestige-rings':next.rings,'--theme-rotation':`${next.rotation}deg`}))document.documentElement.style.setProperty(key,String(value));
 }
-function renderAchievements(s){
-  const stamp=JSON.stringify([s.achievementRecords,Math.floor(s.totalEarned),s.clicks,s.eventStats,earnedAchievements.size,selectedCosmetic,prestigePage]);if(stamp===lastAchievementStamp)return;lastAchievementStamp=stamp;
-  const stats=getStats(s),unlocked=COSMETICS.filter(c=>cosmeticUnlocked(s,c.id));
-  const cosmeticStamp=JSON.stringify([s.achievements,selectedCosmetic,prestigePage,s.prestigeCount]);
-  if(renderAchievements.cosmeticStamp!==cosmeticStamp){renderAchievements.cosmeticStamp=cosmeticStamp;
+function renderRewards(s){
+  const stamp=JSON.stringify([s.achievements,selectedCosmetic,prestigePage,s.prestigeCount]);if(renderRewards.stamp===stamp)return;renderRewards.stamp=stamp;
+  const unlocked=COSMETICS.filter(c=>cosmeticUnlocked(s,c.id));
   $('#cosmetics-panel').innerHTML=`<div class="cosmetics-heading"><div><span class="eyebrow">НАГРАДЫ ЗА ВАШИ ОТКРЫТИЯ</span><h2>Ваша лаборатория — ваш стиль</h2></div><span>${unlocked.length} / ${COSMETICS.length}</span></div><p>Достижения открывают оформление. Выбранный облик сохраняется вместе с игрой.</p><div class="cosmetics-grid">${COSMETICS.map(c=>{const open=cosmeticUnlocked(s,c.id);return `<button class="cosmetic-card ${appearance?.id===c.id?'selected':''}" data-cosmetic="${c.id}" ${open?'':'disabled'} aria-pressed="${appearance?.id===c.id}"><span class="cosmetic-swatch" style="--swatch:${c.colors.accent};--swatch-bg:${c.colors.tint}">${open?'✦':'◇'}</span><strong>${c.name}</strong><small>${c.description}</small><span>${appearance?.id===c.id?'✓ Выбрано':open?'Применить оформление':'Пока закрыто'}</span></button>`;}).join('')}</div>${s.prestigeCount?`<section class="prestige-honors"><div class="cosmetics-heading"><h2>Супердостижения · ${fmt(s.prestigeCount,0)}</h2><span>У каждого перерождения свой мир</span></div><div class="cosmetics-grid">${getPrestigeHonors(s.prestigeCount,{offset:prestigePage*8,limit:8}).map(h=>`<button class="cosmetic-card super-achievement ${appearance?.id===h.id?'selected':''}" data-cosmetic="${h.id}" aria-pressed="${appearance?.id===h.id}"><span class="cosmetic-swatch" style="--swatch:${h.appearance.accent};--swatch-bg:${h.appearance.tint}">∞</span><strong>${esc(h.name)}</strong><small>${esc(h.text)}</small><span>${appearance?.id===h.id?'✓ Выбрано':'Надеть облик'}</span></button>`).join('')}</div>${s.prestigeCount>8?`<div class="honors-pagination"><button class="secondary-button" data-honors-page="-1" ${prestigePage===0?'disabled':''}>← Раньше</button><span>${prestigePage+1} / ${Math.ceil(s.prestigeCount/8)}</span><button class="secondary-button" data-honors-page="1" ${(prestigePage+1)*8>=s.prestigeCount?'disabled':''}>Дальше →</button></div>`:''}</section>`:''}`;
-  }
-  $('#achievements-grid').innerHTML=ACHIEVEMENTS.map(a=>{const done=earnedAchievements.has(a.id),v=Math.min(a.target,a.value(s,stats));return `<article class="achievement-card ${done?'unlocked':''}"><span class="achievement-icon">${a.icon}</span><span class="achievement-state">${done?'✓ ОТКРЫТО':'ЕЩЁ ВПЕРЕДИ'}</span><h2>${a.name}</h2><p>${a.text}</p><div class="progress-track"><div style="width:${done?100:v/a.target*100}%"></div></div><small>${done?'Открытие в вашей коллекции':`${fmt(v)} / ${fmt(a.target)}`}</small></article>`;}).join('');
 }
+function renderAchievements(s){
+  const stamp=JSON.stringify([s.achievementRecords,Math.floor(s.totalEarned),s.clicks,s.eventStats,earnedAchievements.size,achievementFilter]);if(stamp===lastAchievementStamp)return;lastAchievementStamp=stamp;
+  const stats=getStats(s),earned=ACHIEVEMENTS.filter(a=>earnedAchievements.has(a.id)),locked=ACHIEVEMENTS.filter(a=>!earnedAchievements.has(a.id));
+  const card=(a,done)=>{const value=Math.min(a.target,a.value(s,stats)),index=ACHIEVEMENTS.indexOf(a);return `<article class="achievement-card ${done?'unlocked':'locked-achievement'}">${achievementArtwork(a,index,done)}<div class="achievement-copy"><span class="achievement-state">${done?'✓ Получено':'Ещё не получено'}</span><h3>${a.name}</h3><p>${a.text}</p>${done?'<small>В вашей коллекции навсегда</small>':`<div class="progress-track"><div style="width:${value/a.target*100}%"></div></div><small>${fmt(value)} / ${fmt(a.target)}</small>`}</div></article>`;};
+  const group=(items,done)=>`<section class="achievement-section ${done?'earned':'locked'}"><header><h2>${done?'Полученные достижения':'Впереди новые открытия'}</h2><span>${items.length}</span></header>${items.length?`<div class="achievement-group-grid">${items.map(a=>card(a,done)).join('')}</div>`:`<p class="achievement-empty">${done?'Первое достижение появится после первого интеграла.':'Все обычные достижения собраны! Новые миры ждут за чёрной дырой.'}</p>`}</section>`;
+  $('#achievements-grid').innerHTML=(achievementFilter!=='locked'?group(earned,true):'')+(achievementFilter!=='earned'?group(locked,false):'');
+  $$('[data-achievement-filter]').forEach(b=>{const active=b.dataset.achievementFilter===achievementFilter;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));});
+}
+$('#achievement-filters').addEventListener('click',e=>{const b=e.target.closest('[data-achievement-filter]');if(b){achievementFilter=b.dataset.achievementFilter;renderAchievements(projected());}});
 $('#cosmetics-panel').addEventListener('click',e=>{
   const page=e.target.closest('[data-honors-page]');if(page){prestigePage=Math.max(0,Math.min(Math.ceil(state.prestigeCount/8)-1,prestigePage+Number(page.dataset.honorsPage)));render(true);return;}
   const b=e.target.closest('[data-cosmetic]');if(!b||b.disabled)return;
@@ -254,38 +275,66 @@ async function restore(code){
 }
 $('#restore-form').addEventListener('submit',async e=>{e.preventDefault();const code=$('#recovery-code').value.trim();if(!code){toast('Введите код восстановления');return;}if(!confirm('Переключиться на лабораторию по этому коду? Текущая облачная лаборатория останется на сервере. Сохраните её код перед переключением.'))return;try{await restore(code);$('#recovery-code').value='';}catch(error){toast(error.message);}});
 function exportSave(){
-  save();const data=mode==='cloud'?{game:'integrals-remake',version:1,recoveryCode:token,note:'Секретный код доступа к лаборатории. Не публикуйте этот файл.'}:{game:'integrals-remake',version:1,state,nickname,selectedCosmetic,worldPaused,achievements:[...earnedAchievements]};
+  save();const data=mode==='cloud'?{game:'integrals-remake',version:1,recoveryCode:token,note:'Секретный код доступа к лаборатории. Не публикуйте этот файл.'}:{game:'integrals-remake',version:1,state,nickname,selectedCosmetic,worldPaused,cinematicSound,achievements:[...earnedAchievements]};
   const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download=`integrals-remake-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 $('#export-save').addEventListener('click',exportSave);
-$('#import-save').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;if(readOnlyTab){toast('Импорт доступен в первой вкладке');return;}try{if(file.size>100000)throw Error('Слишком большой файл');const data=JSON.parse(await file.text());if(data.game!=='integrals-remake'||data.version!==1)throw Error('Это не сохранение Integrals: Remake');if(!confirm('Загрузить это сохранение вместо текущей лаборатории? Сначала экспортируйте текущее, если хотите к нему вернуться.'))return;if(data.recoveryCode){await restore(data.recoveryCode);}else{const imported=validateState(data.state,true);beginSession();token=null;try{localStorage.removeItem(TOKEN_KEY);}catch{}mode='local';connected=false;pending=[];clickBuffer=0;clockOffset=0;state=imported;settle(state);state.lastSeen=Date.now();nickname=String(data.nickname||'Исследователь').slice(0,24);earnedAchievements=new Set([...(data.achievements||[]).filter(validAchievement),...state.achievements]);selectedCosmetic=typeof data.selectedCosmetic==='string'?data.selectedCosmetic:'classic';prestigePage=0;worldPaused=Boolean(data.worldPaused);updateWorldPause();save();setStatus('На устройстве');showBanner('');render(true);$('#profile-dialog').close();toast('Сохранение загружено');}}catch(error){toast(error.message);}finally{e.target.value='';}});
+$('#import-save').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;if(readOnlyTab){toast('Импорт доступен в первой вкладке');return;}try{if(file.size>100000)throw Error('Слишком большой файл');const data=JSON.parse(await file.text());if(data.game!=='integrals-remake'||data.version!==1)throw Error('Это не сохранение Integrals: Remake');if(!confirm('Загрузить это сохранение вместо текущей лаборатории? Сначала экспортируйте текущее, если хотите к нему вернуться.'))return;if(data.recoveryCode){await restore(data.recoveryCode);}else{const imported=validateState(data.state,true);beginSession();token=null;try{localStorage.removeItem(TOKEN_KEY);}catch{}mode='local';connected=false;pending=[];clickBuffer=0;clockOffset=0;state=imported;settle(state);state.lastSeen=Date.now();nickname=String(data.nickname||'Исследователь').slice(0,24);earnedAchievements=new Set([...(data.achievements||[]).filter(validAchievement),...state.achievements]);selectedCosmetic=typeof data.selectedCosmetic==='string'?data.selectedCosmetic:'classic';prestigePage=0;worldPaused=Boolean(data.worldPaused);cinematicSound=data.cinematicSound!==false;updateWorldPause();save();setStatus('На устройстве');showBanner('');render(true);$('#profile-dialog').close();toast('Сохранение загружено');}}catch(error){toast(error.message);}finally{e.target.value='';}});
 let prestigeSubmitting=false;
+function setCinematicUI(active){
+  cinematicActive=active;$('#page-world').classList.toggle('cinematic-active',active);
+  $('.main-nav').inert=active;$('#world-events').inert=active;$('#profile-button').disabled=active;$('#world-pause').disabled=active;$('#music-button').disabled=active;
+  $('#world-cinematic-skip').hidden=!active;$('#world-cinematic-mute').hidden=!active||!cinematicSound;
+  if(!active)$('#world-cinematic-status').textContent='';
+}
 $('#prestige-open').addEventListener('click',()=>{
-  const s=projected(),stats=getStats(s),next=prestigeAppearance(s.prestigeCount+1);
+  showPage('world');$('#world-widget').scrollIntoView({block:'start',behavior:'instant'});
+  const s=projected(),stats=getStats(s),next=prestigeAppearance(s.prestigeCount+1),missing=Math.max(0,PRESTIGE_PRICE-s.balance);
   $('#prestige-step-one').hidden=false;$('#prestige-step-two').hidden=true;
-  $('#prestige-details').innerHTML=`<div><span>Сейчас</span><strong>${fmt(s.prestige)} ∞</strong></div><div><span>За перерождение</span><strong>+${fmt(stats.prestigeGain)} ∞</strong></div><div class="prestige-reward"><span>Супердостижение и уникальный облик</span><strong>${esc(next.name)}</strong></div>`;
-  $('#prestige-confirm').disabled=stats.prestigeGain<1||Boolean(s.activeEvent)||readOnlyTab;
-  $('#prestige-confirm').textContent=s.activeEvent?'Сначала завершите испытание':stats.prestigeGain<1?`Нужно ещё ${fmt(Math.max(0,1e6-s.runEarned))} ∫ за цикл`:'Да, хочу переродиться';
+  $('#prestige-audio-enabled').checked=cinematicSound;
+  $('#prestige-details').innerHTML=`<div class="prestige-reward"><span>Цена чёрной дыры</span><strong>${fmt(PRESTIGE_PRICE,0)} ∫</strong></div><div><span>Ваш баланс</span><strong>${fmt(s.balance,0)} ∫</strong></div><div><span>За перерождение</span><strong>+${fmt(stats.prestigeGain)} ∞</strong></div><div class="prestige-reward"><span>Супердостижение и уникальный облик</span><strong>${esc(next.name)}</strong></div>${missing>0?`<p class="prestige-missing">Не хватает ${fmt(missing,0)} ∫. Развивайте производство и возвращайтесь.</p>`:''}`;
+  $('#prestige-confirm').disabled=missing>0||stats.prestigeGain<1||Boolean(s.activeEvent)||readOnlyTab;
+  $('#prestige-confirm').textContent=s.activeEvent?'Сначала завершите испытание':missing>0?'Пока недостаточно интегралов':'Да, хочу переродиться';
   $('#prestige-final-confirm').disabled=false;$('#prestige-dialog').showModal();
 });
 $('#prestige-confirm').addEventListener('click',()=>{$('#prestige-step-one').hidden=true;$('#prestige-step-two').hidden=false;$('#prestige-back').focus();});
 $('#prestige-back').addEventListener('click',()=>{$('#prestige-step-two').hidden=true;$('#prestige-step-one').hidden=false;$('#prestige-confirm').focus();});
 $('#prestige-final-confirm').addEventListener('click',async()=>{
-  if(prestigeSubmitting)return;prestigeSubmitting=true;$('#prestige-final-confirm').disabled=true;
-  try{if(await act({type:'prestige'})){
-    selectedCosmetic='prestige';prestigePage=Math.floor((state.prestigeCount-1)/8);save();render(true);$('#prestige-dialog').close();
-    const overlay=$('#prestige-transition');overlay.style.setProperty('--hue',appearance.hue);overlay.hidden=false;overlay.classList.add('active');
-    setTimeout(()=>{overlay.hidden=true;overlay.classList.remove('active');},matchMedia('(prefers-reduced-motion: reduce)').matches?250:2800);
-    toast(`Перерождение №${fmt(state.prestigeCount,0)}. Открыт облик «${appearance.name}».`);
-  }}finally{prestigeSubmitting=false;$('#prestige-final-confirm').disabled=false;}
+  if(prestigeSubmitting)return;
+  prestigeSubmitting=true;$('#prestige-final-confirm').disabled=true;
+  cinematicSound=$('#prestige-audio-enabled').checked;save();
+  const oldWorld=structuredClone(projected()),oldAppearance={...appearance},resumeMusic=music.playing;
+  if(cinematicSound)Promise.resolve(prestigeAudio.prepare?.()).catch(()=>{});
+  setCinematicUI(true);$('#world-cinematic-skip').disabled=true;let succeeded=false;
+  try{
+    succeeded=await act({type:'prestige'});if(!succeeded)return;
+    selectedCosmetic='prestige';prestigePage=Math.floor((state.prestigeCount-1)/8);save();$('#prestige-dialog').close();
+    music.pause();updateMusic();
+    const duration=matchMedia('(prefers-reduced-motion: reduce)').matches?450:6500;
+    $('#world-cinematic-status').textContent='В небе открывается чёрная дыра. Мир переходит в новую эпоху…';
+    if(cinematicSound)prestigeAudio.play({volume:musicVolume/100,durationMs:duration});
+    world.setPaused(false);
+    const animation=world.playPrestige({state:oldWorld,durationMs:duration,hue:oldAppearance.hue});
+    const nextAppearance=selectedAppearance(state);world.update(state,{hue:nextAppearance.hue,accent:nextAppearance.accent});
+    $('#world-cinematic-skip').disabled=false;await animation;
+  }catch{if(succeeded)toast('Новая эпоха сохранена.');}
+  finally{
+    prestigeAudio.stop();setCinematicUI(false);prestigeSubmitting=false;$('#prestige-final-confirm').disabled=false;
+    updateWorldPause();render(true);
+    if(resumeMusic&&!document.hidden){resumeMusicAfterVisibility=false;music.resume().then(updateMusic).catch(()=>{});}
+    else if(resumeMusic)resumeMusicAfterVisibility=true;
+    if(succeeded){$('#world-cinematic-status').textContent=`Эпоха ${fmt(state.prestigeCount,0)} · ${appearance.name}. Новый мир ждёт первых жителей.`;toast(`Перерождение №${fmt(state.prestigeCount,0)}. Облик «${appearance.name}» добавлен в награды.`);}
+  }
 });
+$('#world-cinematic-skip').addEventListener('click',()=>{prestigeAudio.stop();world.finishPrestige();});
+$('#world-cinematic-mute').addEventListener('click',()=>{prestigeAudio.stop();cinematicSound=false;save();$('#world-cinematic-mute').hidden=true;});
 function updateSound(){$('#sound-button').classList.toggle('sound-enabled',sound);$('#sound-button').setAttribute('aria-label',sound?'Выключить звук':'Включить звук');$('#sound-button').title=sound?'Выключить звук':'Включить звук';}
-$('#sound-button').addEventListener('click',()=>{sound=!sound;updateSound();save();blip('buy');});
+$('#sound-button').addEventListener('click',()=>{sound=!sound;if(!sound&&cinematicActive){prestigeAudio.stop();cinematicSound=false;$('#world-cinematic-mute').hidden=true;}updateSound();save();blip('buy');});
 setInterval(()=>{if(readOnlyTab)return;if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>1)showOffline(r.offlineEarned);}if(!document.hidden)render();},200);
 setInterval(()=>{if(readOnlyTab)return;if(mode==='cloud'&&(clickBuffer||pending.length))flush();},800);
 setInterval(async()=>{if(readOnlyTab)return;if(mode==='local'){save();return;}if(busy)return;await flush();if(pending.length)return;try{acceptPlayer((await request('/state')).player);}catch(error){if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');}},15000);
 document.addEventListener('visibilitychange',()=>{if(readOnlyTab)return;if(document.hidden){if(mode==='cloud'){queueClicks();flush();}save();}else if(mode==='cloud'&&!busy){request('/state').then(data=>acceptPlayer(data.player)).catch(error=>{if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');});}else if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>0)showOffline(r.offlineEarned);}});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)music.pause();else music.resume().catch(()=>{});});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){resumeMusicAfterVisibility=resumeMusicAfterVisibility||music.playing;music.pause();prestigeAudio.stop();}else if(resumeMusicAfterVisibility&&!cinematicActive){resumeMusicAfterVisibility=false;music.resume().then(updateMusic).catch(()=>{});}});
 window.addEventListener('storage',event=>{if(readOnlyTab&&event.key===STORAGE&&event.newValue){try{const other=JSON.parse(event.newValue);state=validateState(other.state);nickname=other.nickname;token=readStorage(TOKEN_KEY);mode=other.mode;listed=other.listed;earnedAchievements=new Set((other.achievements||[]).filter(validAchievement));selectedCosmetic=other.selectedCosmetic||'classic';render(true);}catch{}}});
 window.addEventListener('pagehide',()=>{if(mode==='cloud')queueClicks();save();});
 
@@ -293,40 +342,48 @@ window.addEventListener('pagehide',()=>{if(mode==='cloud')queueClicks();save();}
 let selectedEvent=null,eventRenderedId=null,eventAnswers=[],eventResultSeen=null,timeoutRefreshId=null;
 const durationText=ms=>{const sec=Math.max(0,Math.ceil(ms/1000));return `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;};
 function renderLabScene(s){
-  const target=$('#lab-roster'),total=s.generators.reduce((a,b)=>a+b,0);world.update(s,{hue:appearance.hue,accent:appearance.accent});
+  const target=$('#lab-roster'),total=s.generators.reduce((a,b)=>a+b,0);if(!cinematicActive)world.update(s,{hue:appearance.hue,accent:appearance.accent});
   const stamp=JSON.stringify(s.generators);if(renderLabScene.stamp!==stamp){renderLabScene.stamp=stamp;
     const owned=GENERATORS.map((g,i)=>({g,i,n:s.generators[i]})).filter(x=>x.n>0);
-    target.innerHTML=owned.length?owned.map(({g,i,n})=>`<div class="lab-scene-row ${i===3?'roster-teacher':''}"><strong>${esc(g.name)} <span>×${fmt(n,0)}</span></strong><div class="lab-scene-sprites">${Array.from({length:Math.min(n,24)},()=>i===3?`<span class="teacher-portrait"><img src="./assets/original/${ORIGINAL_ICONS[i]}" alt="" width="101" height="64"></span>`:`<img src="./assets/original/${ORIGINAL_ICONS[i]}" alt="" width="48" height="48">`).join('')}${n>24?`<span>+${fmt(n-24,0)}</span>`:''}</div></div>`).join(''):'<div class="lab-scene-empty"><p>Пока здесь тихо.</p><small>Первый помощник появится после покупки в Академии.</small></div>';
-    $('#world-status').textContent=total?`${fmt(total,0)} жителей · ${owned.length} рабочих зон · нажмите на жителя`:'Первый помощник зажжёт свет в лаборатории.';
+    target.innerHTML=owned.length?owned.map(({g,i,n})=>`<div class="lab-scene-row ${i===3?'roster-teacher':''}"><strong>${esc(g.name)} <span>×${fmt(n,0)}</span></strong><div class="lab-scene-sprites">${Array.from({length:Math.min(n,24)},()=>i===3?`<span class="teacher-portrait"><img src="./assets/original/${ORIGINAL_ICONS[i]}" alt="" width="101" height="64"></span>`:`<img src="./assets/original/${ORIGINAL_ICONS[i]}" alt="" width="48" height="48">`).join('')}${n>24?`<span>+${fmt(n-24,0)}</span>`:''}</div></div>`).join(''):'<div class="lab-scene-empty"><p>Пока здесь тихо.</p><small>Первый помощник появится после покупки в магазине.</small></div>';
+    $('#world-status').textContent=total?`${fmt(total,0)} жителей · ${owned.length} открытых направлений · нажмите на здание, чтобы выбрать событие`:'Приглашайте жителей: вместе с ними открываются новые районы.';
     $('#world-canvas').setAttribute('aria-label',total?`Мир интегралов. ${owned.map(x=>`${x.g.name}: ${x.n}`).join(', ')}. Подробности — в списке жителей.`:'Мир интегралов ждёт первого помощника.');
   }
   const now=Date.now()+clockOffset,open=EVENTS.filter(e=>eventAvailable(s,e.id,now)),eventStamp=JSON.stringify([s.activeEvent?.id,open.map(e=>e.id),s.generators[1]>0]);
-  const nav=document.querySelector('[data-page="events"]');nav.classList.toggle('events-ready',Boolean(open.length||s.activeEvent));nav.setAttribute('aria-label',s.activeEvent?'События: испытание идёт':`События: доступно ${open.length}`);
+  const normalOpen=open.filter(e=>e.source!=='world').length,worldOpen=open.length-normalOpen,nav=document.querySelector('[data-page="events"]');nav.classList.toggle('events-ready',Boolean(normalOpen||s.activeEvent));nav.setAttribute('aria-label',s.activeEvent?'События: испытание идёт':`События: доступно ${normalOpen}`);
+  document.querySelector('[data-page="world"]').classList.toggle('events-ready',worldOpen>0);
   if(renderLabScene.eventStamp!==eventStamp){renderLabScene.eventStamp=eventStamp;
-    $('#lab-event-preview').innerHTML=s.activeEvent?`<div class="event-alert active-challenge"><span class="event-alert-count">◷</span><div><h3>${esc(s.activeEvent.name)}</h3><p>Испытание идёт · <b id="active-event-remaining"></b></p><button class="event-alert-action" data-open-event="${s.activeEvent.eventId}">Вернуться к заданию →</button></div></div>`:open.length?`<div class="event-alert ready"><span class="event-alert-count">${open.length}</span><div><h3>Есть новое испытание!</h3><p>${open.slice(0,2).map(e=>esc(e.name)).join(' · ')}${open.length>2?` · и ещё ${open.length-2}`:''}</p><button class="event-alert-action" data-open-event="${open[0].id}">Посмотреть правила и награду →</button></div></div>`:`<div class="event-alert waiting"><span class="event-alert-count">✧</span><div><h3>${s.generators[1]>0?'Перерыв между открытиями':'Первое задание уже близко'}</h3><p>${s.generators[1]>0?'Лаборатория готовит новые испытания. Следующий запуск указан в событиях.':'Пригласите школьника — откроется домашнее задание с наградой.'}</p></div></div>`;
+    $('#lab-event-preview').innerHTML=s.activeEvent?`<div class="event-alert active-challenge"><span class="event-alert-count">◷</span><div><h3>${esc(s.activeEvent.name)}</h3><p>Испытание идёт · <b id="active-event-remaining"></b></p><button class="event-alert-action" data-open-event="${s.activeEvent.eventId}">Вернуться к заданию →</button></div></div>`:open.length?`<div class="event-alert ready"><span class="event-alert-count">${open.length}</span><div><h3>Есть новое испытание!</h3><p>${open.slice(0,2).map(e=>esc(e.name)).join(' · ')}${open.length>2?` · и ещё ${open.length-2}`:''}${worldOpen?`<br>${worldOpen} особых события — во вкладке мира`:''}</p><button class="event-alert-action" data-open-event="${open[0].id}">Посмотреть правила и награду →</button></div></div>`:`<div class="event-alert waiting"><span class="event-alert-count">✧</span><div><h3>${s.generators[1]>0?'Перерыв между открытиями':'Первое задание уже близко'}</h3><p>${s.generators[1]>0?'Лаборатория готовит новые испытания. Следующий запуск указан в событиях.':'Пригласите школьника — откроется домашнее задание с наградой.'}</p></div></div>`;
   }
   if(s.activeEvent&&$('#active-event-remaining'))$('#active-event-remaining').textContent=durationText(s.activeEvent.deadline-now);
 }
 $('#lab-event-preview').addEventListener('click',e=>{const b=e.target.closest('[data-open-event]');if(b)openEvent(b.dataset.openEvent);});
-function renderEvents(s){
-  $('#event-summary').textContent=`${s.eventStats?.wins||0} побед · ${s.eventStats?.losses||0} неудач`;
-  $('#resume-event').hidden=!s.activeEvent;
-  const now=Date.now()+clockOffset;
-  const stamp=JSON.stringify([s.generators,s.activeEvent?.id,Math.floor(now/5000),s.eventCooldowns]);if(renderEvents.stamp===stamp)return;renderEvents.stamp=stamp;
-  $('#events-grid').innerHTML=EVENTS.map((event,index)=>{
-    const generatorIndex=GENERATORS.findIndex(g=>g.id===event.generatorId),unlocked=s.generators[generatorIndex]>0,cooldown=Math.max(0,(s.eventCooldowns?.[event.id]||0)-now),active=s.activeEvent?.eventId===event.id;
-    return `<article class="event-card ${unlocked?'unlocked':''}"><div class="event-card-top"><img src="./assets/original/${ORIGINAL_ICONS[generatorIndex]}" alt="" width="56" height="56"><span class="event-level">ЭТАП ${index+1}</span></div><h2>${esc(event.name)}</h2><p>${esc(event.description)}</p><div class="event-rules">${esc(event.rules)}</div><div class="event-meta"><span>◷ ${event.durationSec} сек</span><span>${unlocked?'✓ Открыто':`Нужен: ${esc(GENERATORS[generatorIndex].name)}`}</span></div><button class="${unlocked?'secondary-button':'locked-event'}" data-event="${event.id}" ${!unlocked||(!active&&s.activeEvent)||cooldown>0&&!active?'disabled':''}>${active?'Продолжить →':!unlocked?'Сначала откройте этап':cooldown>0?`Снова через ${durationText(cooldown)}`:'Правила и награда →'}</button></article>`;
-  }).join('');
+function eventCard(event,s){
+  const now=Date.now()+clockOffset,generatorIndex=GENERATORS.findIndex(g=>g.id===event.generatorId),unlocked=s.generators[generatorIndex]>0,cooldown=Math.max(0,(s.eventCooldowns?.[event.id]||0)-now),active=s.activeEvent?.eventId===event.id;
+  return `<article class="event-card ${unlocked?'unlocked':''} ${event.source==='world'?'world-exclusive':''}"><div class="event-card-top"><img src="./assets/original/${ORIGINAL_ICONS[generatorIndex]}" alt="" width="56" height="56"><span class="event-level">${event.source==='world'?'СОБЫТИЕ МИРА':`ЭТАП ${generatorIndex}`}</span></div><h2>${esc(event.name)}</h2><p>${esc(event.description)}</p><div class="event-rules">${esc(event.rules)}</div><div class="event-meta"><span>◷ ${event.durationSec} сек</span><span>${unlocked?'✓ Открыто':`Нужен: ${esc(GENERATORS[generatorIndex].name)}`}</span></div><button class="${unlocked?'secondary-button':'locked-event'}" data-event="${event.id}" ${!unlocked||(!active&&s.activeEvent)||cooldown>0&&!active?'disabled':''}>${active?'Продолжить →':!unlocked?'Сначала откройте этап':cooldown>0?`Снова через ${durationText(cooldown)}`:'Правила и награда →'}</button></article>`;
 }
+function renderEvents(s){
+  $('#event-summary').textContent=`${s.eventStats?.wins||0} побед · ${s.eventStats?.losses||0} неудач`;$('#resume-event').hidden=!s.activeEvent;
+  const stamp=JSON.stringify([s.generators,s.activeEvent?.id,Math.floor((Date.now()+clockOffset)/5000),s.eventCooldowns]);if(renderEvents.stamp===stamp)return;renderEvents.stamp=stamp;
+  $('#events-grid').innerHTML=EVENTS.filter(e=>e.source!=='world').map(e=>eventCard(e,s)).join('');
+}
+function renderWorldEvents(s){
+  const stamp=JSON.stringify([s.generators,s.activeEvent?.id,Math.floor((Date.now()+clockOffset)/5000),s.eventCooldowns,worldLocation]);if(renderWorldEvents.stamp===stamp)return;renderWorldEvents.stamp=stamp;
+  const all=EVENTS.filter(e=>!worldLocation||worldLocation.generatorIndices.includes(GENERATORS.findIndex(g=>g.id===e.generatorId)));
+  $('#world-location-title').textContent=worldLocation?`События: ${worldLocation.name}`:'События живого мира';$('#world-show-all-events').hidden=!worldLocation;
+  $('#world-events-grid').innerHTML=all.length?all.sort((a,b)=>Number(b.source==='world')-Number(a.source==='world')).map(e=>eventCard(e,s)).join(''):'<p class="world-empty-events">Здесь жители собирают интегралы. Первые испытания откроются в школе.</p>';
+}
+$('#world-events-grid').addEventListener('click',e=>{const b=e.target.closest('[data-event]');if(b&&!cinematicActive)openEvent(b.dataset.event);});
+$('#world-show-all-events').addEventListener('click',()=>{worldLocation=null;renderWorldEvents(projected());});
 $('#events-grid').addEventListener('click',event=>{const button=event.target.closest('[data-event]');if(button)openEvent(button.dataset.event);});
 $('#resume-event').addEventListener('click',()=>openEvent(state.activeEvent?.eventId));
 function openEvent(id){
-  const event=EVENTS.find(e=>e.id===id);if(!event)return;selectedEvent=event;
+  const event=EVENTS.find(e=>e.id===id);if(!event||cinematicActive)return;selectedEvent=event;
   const active=getPublicEvent(state.activeEvent);
   if(active){renderChallenge(active);}else{
     eventRenderedId=null;$('#event-title').textContent=event.name;$('#event-timer').textContent=`${event.durationSec} сек`;
     const stats=getStats(state),reward=Math.max(event.rewardClicks*stats.clickPower,stats.cps*30),penalty=event.penaltyClicks*stats.clickPower;
-    $('#event-body').innerHTML=`<p class="event-description">${esc(event.description)}</p><div class="event-rules-panel"><h3>Правила</h3><p>${esc(event.rules)}</p></div><div class="event-stakes"><div><span>Победа</span><strong>+${fmt(reward)} ∫</strong></div><div><span>Ошибка или время вышло</span><strong>−${fmt(penalty)} ∫</strong></div></div><p class="section-note">Награда: минимум ${event.rewardClicks} ваших кликов. Штраф: до ${event.penaltyClicks} кликов, в пределах текущего баланса. Таймер начнётся после нажатия кнопки. Повтор — через 5 минут.</p><button id="start-event" class="primary-button">Принять испытание →</button>`;
+    $('#event-body').innerHTML=`<p class="event-description">${esc(event.description)}</p><div class="event-rules-panel"><h3>Правила</h3><p>${esc(event.rules)}</p></div><div class="event-stakes"><div><span>Победа</span><strong>+${fmt(reward)} ∫</strong></div><div><span>Ошибка или время вышло</span><strong>−${fmt(penalty)} ∫</strong></div></div><p class="section-note">Награда: минимум ${event.rewardClicks} ваших кликов. Штраф: до ${event.penaltyClicks} кликов, в пределах текущего баланса. Таймер начнётся после нажатия кнопки. Повтор — через ${Math.round(event.cooldownSec/60)} минут.</p><button id="start-event" class="primary-button">Принять испытание →</button>`;
     $('#start-event').addEventListener('click',async()=>{const b=$('#start-event');b.disabled=true;b.textContent='Начинаем…';if(await act({type:'event_start',itemId:event.id})){renderChallenge(getPublicEvent(state.activeEvent));}else if(b.isConnected){b.disabled=false;b.textContent='Попробовать снова';}});
   }
   if(!$('#event-dialog').open)$('#event-dialog').showModal();
@@ -352,7 +409,7 @@ function renderChallenge(active){
 }
 function showEventResult(result){
   if(!result)return;eventResultSeen=result.id;eventRenderedId=null;$('#event-timer').textContent=result.outcome==='win'?'✓':'×';
-  $('#event-body').innerHTML=`<div class="event-result ${result.outcome==='win'?'win':'loss'}"><span>${result.outcome==='win'?'✦':'⌁'}</span><h3>${result.outcome==='win'?'Гипотеза подтверждена!':result.outcome==='timeout'?'Время вышло.':'В этот раз не сошлось.'}</h3><strong>${result.outcome==='win'?`+${fmt(result.reward)}`:`−${fmt(result.penalty)}`} ∫</strong><p>${result.outcome==='win'?'Награда уже в вашей лаборатории.':'Эксперименты бывают разными. Новая попытка откроется после перерыва.'}</p><button type="button" class="primary-button" id="finish-event">Вернуться в лабораторию</button></div>`;
+  $('#event-body').innerHTML=`<div class="event-result ${result.outcome==='win'?'win':'loss'}"><span>${result.outcome==='win'?'✦':'⌁'}</span><h3>${result.outcome==='win'?'Гипотеза подтверждена!':result.outcome==='timeout'?'Время вышло.':'В этот раз не сошлось.'}</h3><strong>${result.outcome==='win'?`+${fmt(result.reward)}`:`−${fmt(result.penalty)}`} ∫</strong><p>${result.outcome==='win'?'Награда уже в вашей лаборатории.':'Эксперименты бывают разными. Новая попытка откроется после перерыва.'}</p><button type="button" class="primary-button" id="finish-event">${currentPage==='world'?'Вернуться в мир':'Продолжить игру'}</button></div>`;
   $('#finish-event').addEventListener('click',()=>$('#event-dialog').close());renderEvents(projected());
 }
 function updateEventTimer(){
@@ -368,12 +425,14 @@ function updateEventTimer(){
   }
 }
 function updateMusic(){const b=$('#music-button');b.classList.toggle('playing',music.playing);b.setAttribute('aria-pressed',String(music.playing));b.setAttribute('aria-label',music.playing?'Выключить музыку':'Включить музыку');b.title=music.playing?'Выключить музыку':'Включить музыку';b.textContent=music.playing?'Ⅱ':'▶';}
-$('#music-button').addEventListener('click',async()=>{try{await music.toggle();updateMusic();}catch{toast('Браузер не смог включить музыку. Попробуйте ещё раз.');}});
+$('#music-button').addEventListener('click',async()=>{resumeMusicAfterVisibility=false;try{await music.toggle();updateMusic();}catch{toast('Браузер не смог включить музыку. Попробуйте ещё раз.');}});
 $('#music-volume').value=musicVolume;$('#music-volume-value').textContent=`${musicVolume}%`;
 $('#music-volume').addEventListener('input',e=>{musicVolume=Number(e.target.value);music.setVolume(musicVolume/100);$('#music-volume-value').textContent=`${musicVolume}%`;save();});
 $('#open-events')?.addEventListener('click',()=>document.querySelector('[data-page="events"]').click());
 const clickEffects=createClickEffects({reactor:$('.reactor-panel'),button:$('#integral-button'),stage:$('#integral-stage'),rain:$('#formula-rain'),ring:$('#cursors-ring')});
-const world=createLabWorld($('#world-canvas'),{onInspect:resident=>toast(`${resident.name} ×${fmt(resident.count,0)} · ${resident.task}`)});
+const world=createLabWorld($('#world-canvas'),{onInspect:resident=>toast(`${resident.name} ×${fmt(resident.count,0)} · ${resident.task}`),onLocation:location=>{
+  if(cinematicActive)return;worldLocation=location;renderWorldEvents(projected());expandWorld(false);$('#world-events').scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+}});
 function updateWorldPause(){world.setPaused(worldPaused);$('#world-pause').setAttribute('aria-pressed',String(worldPaused));$('#world-pause').textContent=worldPaused?'▶':'Ⅱ';$('#world-pause').setAttribute('aria-label',worldPaused?'Оживить мир':'Приостановить мир');$('#world-pause').title=worldPaused?'Оживить мир':'Приостановить мир';}
 $('#world-pause').addEventListener('click',()=>{worldPaused=!worldPaused;updateWorldPause();save();});
 function expandWorld(value){$('#world-widget').classList.toggle('expanded',value);$('#world-expand').setAttribute('aria-expanded',String(value));$('#world-expand').setAttribute('aria-label',value?'Свернуть мир':'Развернуть мир на весь экран');$('#world-expand').textContent=value?'×':'⛶';world.resize();}

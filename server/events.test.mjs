@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENTS, eventAvailable, getPublicEvent } from '../shared/events.mjs';
+import { EVENTS, WORLD_EVENTS, eventAvailable, getPublicEvent } from '../shared/events.mjs';
 import { createState, applyAction, settle, GENERATORS } from '../shared/economy.mjs';
 
-test('all nine event types unlock from their own generator and validate their own generated answers',()=>{
-  assert.equal(EVENTS.length,9);
+test('all twelve event types unlock from their own generator and validate their own generated answers',()=>{
+  assert.equal(EVENTS.length,12);
   for(const event of EVENTS){
     const s=createState(0);
     assert.equal(eventAvailable(s,event.id,0),false);
@@ -20,6 +20,19 @@ test('all nine event types unlock from their own generator and validate their ow
     assert.equal(s.eventStats.wins,1);assert.equal(s.totalEarned,reward);assert.equal(s.activeEvent,null);
     assert.equal(eventAvailable(s,event.id,1),false);
     assert.throws(()=>applyAction(s,{type:'event_start',itemId:event.id},1),{code:'event_cooldown'});
+  }
+});
+test('binary decode gets 90 seconds and world events stay optional with independent unlocks and payoffs',()=>{
+  const binary=EVENTS.find(e=>e.id==='computer');assert.equal(binary.durationSec,90);
+  const s=createState(0);s.generators[4]=1;applyAction(s,{type:'event_start',itemId:'computer'},0);
+  assert.equal(s.activeEvent.deadline,90_000);settle(s,60_000);assert.ok(s.activeEvent);
+  settle(s,90_001);assert.equal(s.lastEventResult.outcome,'timeout');
+  assert.equal(WORLD_EVENTS.length,3);assert.ok(WORLD_EVENTS.every(e=>e.source==='world'));
+  assert.deepEqual(new Set(WORLD_EVENTS.map(e=>e.id)),new Set(['school-olympiad','portal-meteors','academic-discovery']));
+  for(const e of WORLD_EVENTS){
+    const state=createState(0);state.generators[0]=1;settle(state,100_000);assert.equal(state.activeEvent,null);assert.equal(state.eventStats.losses,0);
+    assert.throws(()=>applyAction(state,{type:'event_start',itemId:e.id},100_000),{code:'event_locked'});
+    assert.ok(e.rules&&e.description&&e.rewardClicks>0&&e.penaltyClicks>0);
   }
 });
 test('events are optional; no failure or penalty occurs without explicit start',()=>{
