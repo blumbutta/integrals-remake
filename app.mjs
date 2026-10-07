@@ -347,7 +347,7 @@ let selectedEvent=null,eventRenderedId=null,eventAnswers=[],eventResultSeen=null
 const durationText=ms=>{const sec=Math.max(0,Math.ceil(ms/1000));return `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;};
 function fitResidentRows(){
   $$('#lab-roster [data-resident-index]').forEach(row=>{
-    const index=Number(row.dataset.residentIndex),count=Number(row.dataset.residentCount),sprites=row.querySelector('.lab-scene-sprites');
+    const index=Number(row.dataset.residentIndex),count=Number(row.dataset.residentCount),sprites=row.querySelector('.resident-strip');
     if(!sprites.clientWidth)return;
     const visible=Math.min(count,24,Math.max(1,Math.floor((sprites.clientWidth-96)/32))),stamp=`${index}:${count}:${visible}`;
     if(sprites.dataset.rendered===stamp)return;sprites.dataset.rendered=stamp;
@@ -358,7 +358,7 @@ function renderLabScene(s){
   const target=$('#lab-roster'),total=s.generators.reduce((a,b)=>a+b,0);if(!cinematicActive)world.update(s,{hue:appearance.hue,accent:appearance.accent});
   const stamp=JSON.stringify(s.generators);if(renderLabScene.stamp!==stamp){renderLabScene.stamp=stamp;
     const owned=GENERATORS.map((g,i)=>({g,i,n:s.generators[i]})).filter(x=>x.n>0);
-    target.innerHTML=owned.length?owned.map(({g,i,n})=>`<div class="lab-scene-row ${i===3?'roster-teacher':''}" data-resident-index="${i}" data-resident-count="${n}"><strong>${esc(g.name)} <span>×${fmt(n,0)}</span></strong><div class="lab-scene-sprites" aria-hidden="true"></div></div>`).join(''):'<div class="lab-scene-empty"><p>Пока здесь тихо.</p><small>Первого помощника можно приобрести в «Ресурсах».</small></div>';
+    target.innerHTML=owned.length?owned.map(({g,i,n})=>`<div class="lab-scene-row ${i===3?'roster-teacher':''}" data-resident-index="${i}" data-resident-count="${n}"><strong>${esc(g.name)} <span>×${fmt(n,0)}</span></strong><div class="resident-strip" aria-hidden="true"></div></div>`).join(''):'<div class="lab-scene-empty"><p>Пока здесь тихо.</p><small>Первого помощника можно приобрести в «Ресурсах».</small></div>';
     fitResidentRows();
     $('#world-status').textContent=total?`${fmt(total,0)} жителей · ${owned.length} открытых направлений · нажмите на здание, чтобы выбрать событие`:'Приглашайте жителей: вместе с ними открываются новые районы.';
     $('#world-canvas').setAttribute('aria-label',total?`Мир интегралов. ${owned.map(x=>`${x.g.name}: ${x.n}`).join(', ')}. Подробности — в списке жителей.`:'Мир интегралов ждёт первого помощника.');

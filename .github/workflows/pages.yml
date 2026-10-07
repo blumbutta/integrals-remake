@@ -29,6 +29,7 @@ jobs:
           cp index.html style.css app.mjs music.mjs format.mjs effects.mjs world.mjs research-art.mjs achievement-art.mjs prestige-audio.mjs public/
           cp shared/*.mjs public/shared/
           cp -R assets/. public/assets/
+          node server/version-public.mjs public
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
