@@ -243,3 +243,7 @@ body[data-theme]:not([data-theme="classic"]) .shop-prestige{background:hsl(var(-
   .shop-panel .generator-meta strong{font-size:15px}
   .shop-panel .generator-meta>span{font-size:10px}
 }
+
+/* The changing remaining amount occupies its own line below the title. */
+.next-goal .goal-copy>div:first-child{display:block}
+.next-goal #goal-progress{display:block;margin:4px 0 0;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;font-variant-numeric:lining-nums tabular-nums}
