@@ -167,9 +167,17 @@ document.addEventListener('keydown',event=>{if(event.code==='Space'&&!event.repe
 $('#golden-button').addEventListener('click',()=>act({type:'golden'}));
 function maxQuantity(g,index,balance){let count=0;while(count<100&&priceFor(g.id,state.generators[index],count+1)<=balance)count++;return Math.max(1,count);}
 let lastShopStamp='',lastAchievementStamp='';
+function renderBalance(value){
+  const balance=$('#balance'),label=fmt(value);
+  if(balance.textContent!==label)balance.textContent=label;
+  balance.title=fmt(value,2);
+  // Always reserve a decimal place, even when the formatter omits a trailing zero.
+  const length=label.split(',')[0].length+2;
+  balance.style.fontSize=`${Math.max(22,Math.min(56,440/Math.max(8,length)))}px`;
+}
 function render(force=false){
   const s=projected(),stats=getStats(s);
-  $('#balance').textContent=fmt(s.balance);$('#balance').title=fmt(s.balance,2);$('#balance').style.fontSize=`${Math.max(22,Math.min(56,440/Math.max(8,fmt(s.balance).length)))}px`;$('#cps').textContent=fmt(stats.cps,2);$('#click-power').textContent=`+${fmt(stats.clickPower)}`;$('#total-earned').textContent=fmt(s.totalEarned);$('#total-clicks').textContent=fmt(s.clicks);$('#multiplier').textContent=`×${fmt(stats.multiplier,2)}`;
+  renderBalance(s.balance);$('#cps').textContent=fmt(stats.cps,2);$('#click-power').textContent=`+${fmt(stats.clickPower)}`;$('#total-earned').textContent=fmt(s.totalEarned);$('#total-clicks').textContent=fmt(s.clicks);$('#multiplier').textContent=`×${fmt(stats.multiplier,2)}`;
   $('#profile-name').textContent=nickname;$('#prestige-badge').textContent=fmt(s.prestige);$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#prestige-total').textContent=fmt(s.prestige,0);$('#upgrade-count').textContent=s.upgrades.length;
   $$('#statistics-panel strong[id]').forEach(value=>{value.textContent=value.textContent.replace(/\u00a0/g,' ');value.classList.toggle('stat-long',value.textContent.length>16);value.title=value.textContent;});
   $('#era-label').textContent=s.totalEarned>=1e9?'ЭПОХА IV · ЗА ГРАНЬЮ БЕСКОНЕЧНОСТИ':s.totalEarned>=1e6?'ЭПОХА III · ЕДИНАЯ ТЕОРИЯ':s.totalEarned>=1000?'ЭПОХА II · БОЛЬШИЕ ОТКРЫТИЯ':'ЭПОХА I · ПЕРВЫЙ ПРИНЦИП';
@@ -334,7 +342,14 @@ $('#world-cinematic-skip').addEventListener('click',()=>{prestigeAudio.stop();wo
 $('#world-cinematic-mute').addEventListener('click',()=>{prestigeAudio.stop();cinematicSound=false;save();$('#world-cinematic-mute').hidden=true;});
 function updateSound(){$('#sound-button').classList.toggle('sound-enabled',sound);$('#sound-button').setAttribute('aria-label',sound?'Выключить звук':'Включить звук');$('#sound-button').title=sound?'Выключить звук':'Включить звук';}
 $('#sound-button').addEventListener('click',()=>{sound=!sound;if(!sound&&cinematicActive){prestigeAudio.stop();cinematicSound=false;$('#world-cinematic-mute').hidden=true;}updateSound();save();blip('buy');});
-setInterval(()=>{if(readOnlyTab)return;if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>1)showOffline(r.offlineEarned);}if(!document.hidden)render();},200);
+let renderStep=0;
+setInterval(()=>{
+  if(readOnlyTab)return;
+  if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>1)showOffline(r.offlineEarned);}
+  renderStep=(renderStep+1)%3;
+  // The balance ticks three times faster; the rest of the interface keeps its cadence.
+  if(!document.hidden){if(renderStep===0)render();else renderBalance(projected().balance);}
+},200/3);
 setInterval(()=>{if(readOnlyTab)return;if(mode==='cloud'&&(clickBuffer||pending.length))flush();},800);
 setInterval(async()=>{if(readOnlyTab)return;if(mode==='local'){save();return;}if(busy)return;await flush();if(pending.length)return;try{acceptPlayer((await request('/state')).player);}catch(error){if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');}},15000);
 document.addEventListener('visibilitychange',()=>{if(readOnlyTab)return;if(document.hidden){if(mode==='cloud'){queueClicks();flush();}save();}else if(mode==='cloud'&&!busy){request('/state').then(data=>acceptPlayer(data.player)).catch(error=>{if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');});}else if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>0)showOffline(r.offlineEarned);}});
