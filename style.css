@@ -247,3 +247,7 @@ body[data-theme]:not([data-theme="classic"]) .shop-prestige{background:hsl(var(-
 /* The changing remaining amount occupies its own line below the title. */
 .next-goal .goal-copy>div:first-child{display:block}
 .next-goal #goal-progress{display:block;margin:4px 0 0;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left;font-variant-numeric:lining-nums tabular-nums}
+
+/* Cloud failures must not look like a successful save. */
+.save-status.warning{color:#f4d28c}.save-status.warning i{background:#f4c361}.save-status.error{color:#f2b3a5}.save-status.error i{background:#ed927c}.save-status.syncing i{background:#a2cfec}
+#connection-banner{font:14px/1.6 Arial,sans-serif}#connection-banner .text-button{margin-left:12px;font:600 14px/1.5 Arial,sans-serif}#profile-dialog #retry-cloud{margin-top:13px;font-size:14px;min-height:42px}

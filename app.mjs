@@ -2,6 +2,7 @@ import {GENERATORS, UPGRADES, PRESTIGE_PRICE, createState, migrateState, settle,
 import {EVENTS,eventAvailable,eventStakes,getPublicEvent} from './shared/events.mjs';
 import {PROFILE_EMOJIS,profileEmoji} from './shared/profile.mjs';
 import {resourceInfo,resourceDiscovered} from './resource-info.mjs';
+import {describeCloudError,rejectedCloudAction,shouldAcceptCloudPlayer} from './cloud-connection.mjs';
 import {createMusicPlayer} from './music.mjs';
 import {ACHIEVEMENTS,COSMETICS,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors} from './shared/achievements.mjs';
 import {formatNumber as fmt} from './format.mjs';
@@ -26,6 +27,7 @@ let storageAvailable=true;
 function writeStorage(key,value){try{localStorage.setItem(key,value);}catch{storageAvailable=false;}}
 let saved;try{saved=JSON.parse(readStorage(STORAGE)||'null');}catch{}
 let sessionEpoch=0,readOnlyTab=false,releaseTabLock,transitioning=false,flushPromise=null;
+let acceptedCloudPlayer=null,connectionProblem=null,reconnectPromise=null,nextCloudRetryAt=0,cloudChecking=false;
 if(navigator.locks){readOnlyTab=!(await new Promise(resolve=>{navigator.locks.request('integrals-remake-active-tab',{ifAvailable:true},lock=>{if(!lock){resolve(false);return;}resolve(true);return new Promise(r=>releaseTabLock=r);}).catch(()=>resolve(true));}));}
 let token=readStorage(TOKEN_KEY)||null;
 let state=createState(),mode=token?'cloud':'local',connected=false,quantity=1,currentPage='lab',busy=false,baseTime=Date.now(),clockOffset=0,pending=[],clickBuffer=0;
@@ -76,17 +78,54 @@ function save(){
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,4200);}
 function setStatus(text,kind='local'){$('#save-status').innerHTML=`<i></i>${esc(text)}`;$('#save-status').className=`save-status ${kind}`;}
 function showBanner(message,connectButton=false){const b=$('#connection-banner');b.hidden=!message;b.replaceChildren();if(!message)return;const span=document.createElement('span');span.textContent=message;b.append(span);if(connectButton){const btn=document.createElement('button');btn.className='text-button';btn.textContent='Подключить облако →';btn.addEventListener('click',connectCloud);b.append(btn);}}
+function reportCloudFailure(error){
+  if(error.code==='stale_response')return;
+  connected=false;connectionProblem=describeCloudError(error,{online:navigator.onLine});
+  nextCloudRetryAt=Date.now()+connectionProblem.retryDelayMs;
+  setStatus(connectionProblem.title,connectionProblem.kind);
+  $('#save-status').title=connectionProblem.message;
+  showBanner(connectionProblem.message);
+  const retry=document.createElement('button');retry.type='button';retry.className='text-button';retry.textContent='Проверить соединение';retry.addEventListener('click',()=>syncCloud(true));$('#connection-banner').append(retry);
+  if($('#profile-dialog').open)refreshAccountStatus();
+}
 async function request(path,options={}){
   const requestEpoch=sessionEpoch;
-  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),10000);
-  try{const response=await fetch(API+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`} : {}),...options.headers},signal:controller.signal,cache:'no-store'});
-    let data;try{data=await response.json();}catch{throw new Error('Сервер пока недоступен');}
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(API+path,{...options,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`} : {}),...options.headers},signal:controller.signal,cache:'no-store'});
+    let data;try{data=await response.json();}catch{}
+    if(!response.ok){const error=new Error(data?.error?.message||'Сервер отклонил запрос');error.code=data?.error?.code||'http_error';error.status=response.status;error.serverRejected=typeof data?.error?.code==='string';throw error;}
+    if(!data||typeof data!=='object'){const error=new Error('Не удалось прочитать ответ сервера');error.code='invalid_response';throw error;}
     if(requestEpoch!==sessionEpoch){const error=new Error('Профиль изменился');error.status=499;error.code='stale_response';throw error;}
-    if(!response.ok){const error=new Error(data.error?.message||'Сервер пока недоступен');error.code=data.error?.code;error.status=response.status;throw error;}return data;
+    return data;
+  }catch(error){
+    if(requestEpoch!==sessionEpoch){const stale=new Error('Профиль изменился');stale.code='stale_response';stale.status=499;throw stale;}
+    if(controller.signal.aborted){const timeoutError=new Error('Сервер не ответил вовремя');timeoutError.code='timeout';throw timeoutError;}
+    if(!error.code&&!error.status)error.code='network';throw error;
   }finally{clearTimeout(timeout);}
 }
+function syncCloud(manual=false){
+  if(mode!=='cloud'||readOnlyTab||transitioning)return Promise.resolve(false);
+  if(reconnectPromise)return reconnectPromise;
+  if(Date.now()<nextCloudRetryAt&&(!manual||connectionProblem?.code==='rate_limited'))return Promise.resolve(false);
+  const epoch=sessionEpoch;
+  reconnectPromise=(async()=>{
+    try{
+      if(busy)await flushPromise;
+      if(epoch!==sessionEpoch)return false;
+      if(!connected)setStatus('Проверяем связь…','syncing');
+      cloudChecking=true;
+      try{acceptPlayer((await request('/state')).player);}finally{if(epoch===sessionEpoch)cloudChecking=false;}
+      await flush();return connected;
+    }catch(error){if(epoch===sessionEpoch)reportCloudFailure(error);return false;}
+    finally{if(epoch===sessionEpoch){reconnectPromise=null;if($('#profile-dialog').open)refreshAccountStatus();}}
+  })();
+  if($('#profile-dialog').open)refreshAccountStatus();return reconnectPromise;
+}
 function acceptPlayer(player){
-  if(player.id===state.id&&(player.revision||0)<(state.revision||0))return;
+  if(!player||typeof player.id!=='string'||!Number.isSafeInteger(player.revision)||!Number.isFinite(player.serverTime)||!Array.isArray(player.generators)||!Number.isFinite(player.balance)){const error=new Error('Ответ профиля повреждён');error.code='invalid_response';throw error;}
+  if(!shouldAcceptCloudPlayer(player,acceptedCloudPlayer))return;
+  acceptedCloudPlayer={id:player.id,revision:player.revision};connectionProblem=null;nextCloudRetryAt=0;$('#save-status').title='Прогресс подтверждён сервером';
   state=migrateState({...player,lastSettled:player.serverTime});baseTime=Date.now();clockOffset=(player.serverTime||Date.now())-Date.now();nickname=player.nickname;emoji=profileEmoji(player.emoji);listed=player.listed;connected=true;for(const id of player.achievements||[])earnedAchievements.add(id);
   setStatus('В облаке','online');showBanner('');save();render(true);
   if(player.offlineEarned>0)showOffline(player.offlineEarned);
@@ -95,7 +134,7 @@ function showOffline(value){if(value<1)return;$('#offline-earned').textContent=`
 async function init(){
   if(readOnlyTab){setStatus('Только просмотр');showBanner('Лаборатория уже открыта в другой вкладке. Здесь доступен просмотр. Закройте другую вкладку и обновите эту, чтобы продолжить.');render(true);return;}
   if(mode==='cloud'){
-    try{acceptPlayer((await request('/state')).player);await flush();}catch(error){if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');showBanner('Связь с облаком потеряна. Ваш прогресс сохранён на сервере; повторяем подключение.');if(error.status===401){showBanner('Код сохранения не принят. Откройте профиль и восстановите лабораторию по действующему коду.');}}
+    await syncCloud();
   }else{
     setStatus('На устройстве');
     try{await request('/health');
@@ -106,7 +145,7 @@ async function init(){
   }
   render(true);
 }
-function beginSession(){sessionEpoch++;busy=false;flushPromise=null;pending=[];clickBuffer=0;for(const resolve of actionWaiters.values())resolve(false);actionWaiters.clear();}
+function beginSession(){sessionEpoch++;busy=false;flushPromise=null;reconnectPromise=null;acceptedCloudPlayer=null;connectionProblem=null;nextCloudRetryAt=0;cloudChecking=false;connected=false;pending=[];clickBuffer=0;for(const resolve of actionWaiters.values())resolve(false);actionWaiters.clear();}
 async function createCloud(){
   transitioning=true;let result;try{result=await request('/players',{method:'POST',body:JSON.stringify({nickname,emoji})});}finally{transitioning=false;}
   beginSession();token=result.token;writeStorage(TOKEN_KEY,token);mode='cloud';pending=[];clickBuffer=0;earnedAchievements=new Set();acceptPlayer(result.player);toast('Облачная лаборатория создана. Сохраните код восстановления в профиле.');
@@ -125,23 +164,23 @@ function projected(){
 }
 function queueClicks(){if(!clickBuffer)return;pending.push({id:`${Date.now()+clockOffset}-${crypto.randomUUID()}`,type:'click',amount:clickBuffer});clickBuffer=0;save();}
 function flush(){
-  if(mode!=='cloud'||readOnlyTab)return Promise.resolve();
+  if(mode!=='cloud'||readOnlyTab||!connected||cloudChecking||Date.now()<nextCloudRetryAt)return Promise.resolve();
   if(busy)return flushPromise;
   flushPromise=performFlush();return flushPromise;
 }
 async function performFlush(){
-  queueClicks();busy=true;const flushEpoch=sessionEpoch;
+  queueClicks();if(!pending.length)return;busy=true;const flushEpoch=sessionEpoch;
   try{
     while(pending.length){const action=pending[0];setStatus('Сохраняем…','syncing');
-      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;pending.shift();const delayedPrestige=action.type==='prestige'&&!actionWaiters.has(action.id);if(delayedPrestige){selectedCosmetic='prestige';prestigePage=Math.floor((data.player.prestigeCount-1)/8);}acceptPlayer(data.player);if(delayedPrestige)toast('Перерождение подтверждено сервером. Новый облик добавлен в награды.');actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
+      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;const delayedPrestige=action.type==='prestige'&&!actionWaiters.has(action.id);if(delayedPrestige){selectedCosmetic='prestige';prestigePage=Math.floor((data.player.prestigeCount-1)/8);}acceptPlayer(data.player);pending.shift();save();if(delayedPrestige)toast('Перерождение подтверждено сервером. Новый облик добавлен в награды.');actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
       catch(error){
         if(flushEpoch!==sessionEpoch)return;
-        if(error.status>=400&&error.status<500&&error.status!==429){pending.shift();save();actionWaiters.get(action.id)?.(false);actionWaiters.delete(action.id);toast(error.message);continue;}
+        if(rejectedCloudAction(error)&&error.serverRejected){pending.shift();save();actionWaiters.get(action.id)?.(false);actionWaiters.delete(action.id);toast(error.message);acceptPlayer((await request('/state')).player);continue;}
         throw error;
       }
     }
-    connected=true;setStatus('В облаке','online');
-  }catch(error){if(flushEpoch!==sessionEpoch)return;connected=false;setStatus('Ожидаем связь','warning');showBanner('Соединение прервалось. Подтверждённый прогресс сохранён; производство продолжается.');}
+    if(connected)setStatus('В облаке','online');
+  }catch(error){if(flushEpoch!==sessionEpoch)return;reportCloudFailure(error);}
   finally{if(flushEpoch!==sessionEpoch)return;busy=false;if(!connected){for(const resolve of actionWaiters.values())resolve(false);actionWaiters.clear();}render();}
 }
 async function act(action){
@@ -323,8 +362,9 @@ function refreshAccountStatus(){
   $('#copy-code').disabled=!cloud||!token;$('#download-code').disabled=!cloud||!token;
   $('#connect-cloud').hidden=cloud;$('#connect-cloud').disabled=transitioning||readOnlyTab;
   $('#account-code-block').hidden=!cloud;
-  $('#account-status').textContent=cloud?(connected?'Облачная учётная запись':'Облачная учётная запись · ожидаем связь'):'Сохранение в браузере';
-  $('#account-details').textContent=cloud?`Вход при открытии игры выполняется автоматически. ${state.id?`Номер профиля: ${state.id.slice(0,8)}.`:''} ${connected?'Прогресс хранится на сервере.':'Сохранённый ключ остаётся в браузере; при восстановлении связи откроется этот же профиль.'}`:'В этом браузере игра продолжится с того же места. Для общего рейтинга подключите облако. Уже играли в облаке? Введите свой ключ входа ниже.';
+  $('#retry-cloud').hidden=!cloud;$('#retry-cloud').disabled=Boolean(reconnectPromise)||busy||readOnlyTab;$('#retry-cloud').textContent=reconnectPromise?'Проверяем…':'Проверить соединение';
+  $('#account-status').textContent=cloud?(connected?'Облачная учётная запись':connectionProblem?.title||'Проверяем облачный профиль'):'Сохранение в браузере';
+  $('#account-details').textContent=cloud?`Вход при открытии игры выполняется автоматически. ${state.id?`Номер профиля: ${state.id.slice(0,8)}.`:''} ${connected?'Прогресс хранится на сервере.':connectionProblem?.message||'Проверяем сохранённый ключ и загружаем профиль с сервера.'}`:'В этом браузере игра продолжится с того же места. Для общего рейтинга подключите облако. Уже играли в облаке? Введите свой ключ входа ниже.';
   $('#account-code').textContent=storageAvailable?'Секретный ключ сохранён в этом браузере.':'Браузер не сохранил ключ — обязательно скачайте его.';
   $('#profile-mode').textContent=cloud?'Скачайте ключ входа: он вернёт эту учётную запись на другом устройстве или после очистки браузера. Имя и эмодзи не заменяют ключ.':'Сделайте экспорт сохранения, чтобы не потерять локальную игру после очистки браузера. Облачная лаборатория начнётся с нуля — перед переходом игра предложит резервную копию.';
 }
@@ -333,6 +373,7 @@ function openProfile(){
   renderEmojiPicker();refreshAccountStatus();$('#profile-dialog').showModal();
 }
 $('#profile-button').addEventListener('click',openProfile);
+$('#retry-cloud').addEventListener('click',()=>syncCloud(true));
 $('#emoji-options').addEventListener('click',event=>{const button=event.target.closest('[data-emoji]');if(!button)return;draftEmoji=profileEmoji(button.dataset.emoji);for(const item of $$('#emoji-options button')){const selected=item.dataset.emoji===draftEmoji;item.classList.toggle('selected',selected);item.setAttribute('aria-pressed',String(selected));}});
 $('#connect-cloud').addEventListener('click',async()=>{if(readOnlyTab||transitioning)return;$('#connect-cloud').disabled=true;try{await connectCloud();}finally{refreshAccountStatus();}});
 $('#profile-form').addEventListener('submit',async e=>{e.preventDefault();if(readOnlyTab){toast('Профиль изменяется в первой вкладке');return;}const name=$('#nickname').value.normalize('NFC').trim().replace(/ +/g,' ');if([...name].length<2||[...name].length>24||/[\p{Cc}\p{Cf}<>@/\\]/u.test(name)){toast('Имя: от 2 до 24 символов, без ссылок и адресов');return;}
@@ -416,8 +457,9 @@ setInterval(()=>{
   if(!document.hidden){if(renderStep===0)render();else renderBalance(projected().balance);}
 },200/3);
 setInterval(()=>{if(readOnlyTab)return;if(mode==='cloud'&&(clickBuffer||pending.length))flush();},800);
-setInterval(async()=>{if(readOnlyTab)return;if(mode==='local'){save();return;}if(busy)return;await flush();if(pending.length)return;try{acceptPlayer((await request('/state')).player);}catch(error){if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');}},15000);
-document.addEventListener('visibilitychange',()=>{if(readOnlyTab)return;if(document.hidden){if(mode==='cloud'){queueClicks();flush();}save();}else if(mode==='cloud'&&!busy){request('/state').then(data=>acceptPlayer(data.player)).catch(error=>{if(error.code==='stale_response')return;connected=false;setStatus('Ожидаем связь','warning');});}else if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>0)showOffline(r.offlineEarned);}});
+setInterval(()=>{if(readOnlyTab)return;if(mode==='local'){save();return;}syncCloud();},15000);
+window.addEventListener('online',()=>syncCloud(true));
+document.addEventListener('visibilitychange',()=>{if(readOnlyTab)return;if(document.hidden){if(mode==='cloud'){queueClicks();flush();}save();}else if(mode==='cloud'){syncCloud();}else if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>0)showOffline(r.offlineEarned);}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){resumeMusicAfterVisibility=resumeMusicAfterVisibility||music.playing;music.pause();prestigeAudio.stop();}else if(resumeMusicAfterVisibility&&!cinematicActive){resumeMusicAfterVisibility=false;music.resume().then(updateMusic).catch(()=>{});}});
 window.addEventListener('storage',event=>{if(readOnlyTab&&event.key===STORAGE&&event.newValue){try{const other=JSON.parse(event.newValue);state=validateState(other.state);nickname=other.nickname;emoji=profileEmoji(other.emoji);token=readStorage(TOKEN_KEY);mode=other.mode;listed=other.listed;earnedAchievements=new Set((other.achievements||[]).filter(validAchievement));selectedCosmetic=other.selectedCosmetic||'classic';render(true);}catch{}}});
 window.addEventListener('pagehide',()=>{if(mode==='cloud')queueClicks();save();});
@@ -512,7 +554,7 @@ function updateEventTimer(){
   if($('#event-dialog').open&&active&&eventRenderedId===active.id){
     $('#event-timer').textContent=durationText(active.deadline-now);$('#event-timer').classList.toggle('urgent',active.deadline-now<10000);
     if(active.kind==='reverse'&&$('#memory-preview')&&now>=active.data.memorizeUntil)$('#memory-preview').textContent='• • • •';
-    if(now>=active.deadline){const b=$('#event-answer-form [type="submit"]');if(b)b.disabled=true;if(mode==='cloud'&&timeoutRefreshId!==active.id){timeoutRefreshId=active.id;setTimeout(()=>{if(!busy)request('/state').then(data=>acceptPlayer(data.player)).catch(()=>{});},250);}}
+    if(now>=active.deadline){const b=$('#event-answer-form [type="submit"]');if(b)b.disabled=true;if(mode==='cloud'&&timeoutRefreshId!==active.id){timeoutRefreshId=active.id;setTimeout(()=>syncCloud(),250);}}
   }
   if(!active&&state.lastEventResult&&state.lastEventResult.id!==eventResultSeen){
     eventResultSeen=state.lastEventResult.id;if($('#event-dialog').open&&eventRenderedId)showEventResult(state.lastEventResult);
