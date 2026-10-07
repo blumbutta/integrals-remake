@@ -3,8 +3,9 @@
  * 80 BPM; eight bars of warm extended chords, an evolving arpeggio and a
  * composed upper melody. Audio is synthesized here; no recordings are used.
  *
- * Call toggle() from a user gesture. pause()/resume() are intended for page
- * visibility changes. resume() never creates an AudioContext by itself.
+ * start() may be attempted on load and repeated from a user gesture if the
+ * browser blocks autoplay. pause()/resume() also handle page visibility;
+ * resume() never creates an AudioContext by itself.
  */
 export function createMusicPlayer() {
   const BPM = 80;
@@ -47,7 +48,9 @@ export function createMusicPlayer() {
   let delayFeedback = null;
   let timer = null;
   let volume = 0.35;
-  let playing = false;
+  // Intent must survive a suspended autoplay attempt so toggle() can cancel
+  // it. Actual playback also requires a running context and our scheduler.
+  let playbackRequested = false;
   let stepIndex = 0;
   let nextStepTime = 0;
   let generation = 0;
@@ -244,7 +247,7 @@ export function createMusicPlayer() {
   }
 
   function schedule() {
-    if (!playing || !context || context.state !== 'running') return;
+    if (!playbackRequested || !context || context.state !== 'running') return;
     const now = context.currentTime;
     // A stalled tab must never replay a backlog of notes in one loud burst.
     if (nextStepTime < now - 0.08) nextStepTime = now + 0.035;
@@ -256,7 +259,7 @@ export function createMusicPlayer() {
   }
 
   function pause() {
-    playing = false;
+    playbackRequested = false;
     const token = ++generation;
     clearInterval(timer);
     timer = null;
@@ -273,27 +276,32 @@ export function createMusicPlayer() {
     // Let note-release and the master fade run before suspending. A rapid
     // resume invalidates this timeout so it cannot suspend fresh playback.
     setTimeout(() => {
-      if (generation === token && !playing && context?.state === 'running') {
+      if (generation === token && !playbackRequested && context?.state === 'running') {
         context.suspend().catch(() => {});
       }
     }, 65);
   }
 
   async function resume() {
-    if (!context || context.state === 'closed') return;
-    if (playing && context.state === 'running') return;
+    if (!context || context.state === 'closed') return false;
+    if (isPlaying()) return true;
     const token = ++generation;
-    playing = true;
+    playbackRequested = true;
     try {
       await context.resume();
     } catch (error) {
-      if (generation === token) playing = false;
+      if (generation === token) pause();
       throw error;
     }
-    if (generation !== token || !playing) return;
+    if (generation !== token || !playbackRequested) {
+      // A delayed browser permission must not revive a disabled player, even
+      // if pause's fade timeout already ran while the context was suspended.
+      if (!playbackRequested && context.state === 'running') context.suspend().catch(() => {});
+      return false;
+    }
     if (context.state !== 'running') {
-      playing = false;
-      return;
+      playbackRequested = false;
+      return false;
     }
     const now = context.currentTime;
     master.gain.cancelScheduledValues(now);
@@ -306,23 +314,31 @@ export function createMusicPlayer() {
     clearInterval(timer);
     schedule();
     timer = setInterval(schedule, 35);
+    return true;
+  }
+
+  function isPlaying() {
+    return playbackRequested && context?.state === 'running' && timer !== null;
+  }
+
+  async function start() {
+    createContext();
+    return resume();
   }
 
   async function toggle() {
-    if (playing) {
+    if (playbackRequested) {
       pause();
       return false;
     }
-    createContext();
-    await resume();
-    return playing;
+    return start();
   }
 
   function setVolume(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return;
     volume = Math.min(1, Math.max(0, numeric));
-    if (context && master && playing && context.state !== 'closed') {
+    if (context && master && playbackRequested && context.state !== 'closed') {
       const now = context.currentTime;
       master.gain.cancelScheduledValues(now);
       master.gain.setTargetAtTime(volume * 0.68, now, 0.06);
@@ -330,11 +346,12 @@ export function createMusicPlayer() {
   }
 
   return {
+    start,
     toggle,
     pause,
     resume,
     setVolume,
-    get playing() { return playing; },
+    get playing() { return Boolean(isPlaying()); },
     get volume() { return volume; },
   };
 }

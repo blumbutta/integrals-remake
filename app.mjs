@@ -2,6 +2,8 @@ import {GENERATORS, UPGRADES, PRESTIGE_PRICE, createState, migrateState, settle,
 import {EVENTS,eventAvailable,eventStakes,getPublicEvent} from './shared/events.mjs';
 import {PROFILE_EMOJIS,profileEmoji,normalizeNickname,nicknameValidationError} from './shared/profile.mjs';
 import {resourceInfo,resourceDiscovered} from './resource-info.mjs';
+import {researchInfo,researchList} from './research-info.mjs';
+import {researchTooltipPlacement} from './research-tooltip.mjs';
 import {describeCloudError,rejectedCloudAction,shouldAcceptCloudPlayer} from './cloud-connection.mjs';
 import {createMusicPlayer} from './music.mjs';
 import {ACHIEVEMENTS,COSMETICS,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors} from './shared/achievements.mjs';
@@ -16,7 +18,7 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const music=createMusicPlayer(),prestigeAudio=createPrestigeAudio();
 const actionWaiters=new Map();
-const STORAGE='integrals-remake-v1', TOKEN_KEY='integrals-remake-token';
+const STORAGE='integrals-remake-v1', TOKEN_KEY='integrals-remake-token', MUSIC_KEY='integrals-remake-music';
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 const API=isLocal?`${location.origin}/integrals-api`:'https://kozlogon-server.onrender.com/integrals-api';
 const ORIGINAL_ICONS=['cursoricon.png','grandmaIcon.png','farmIcon.png','factoryIcon.png','mineIcon.png','shipmentIcon.png','alchemylabIcon.png','portalIcon.png','timemachineIcon.png','antimattercondenserIcon.png'];
@@ -36,6 +38,7 @@ let nickname='',listed=true,sound=Boolean(saved?.sound),earnedAchievements=new S
 let needsName=!token&&!saved?.nickname,goldenClaiming=false;
 let cinematicActive=false,cinematicSound=saved?.cinematicSound!==false,resumeMusicAfterVisibility=false,achievementFilter='all',worldLocation=null;
 let localOffline=0,selectedCosmetic=typeof saved?.selectedCosmetic==='string'?saved.selectedCosmetic:'classic',appearance,prestigePage=0,achievementNoticesReady=false;
+let musicEnabled=readStorage(MUSIC_KEY)!=='off';
 let musicVolume=typeof saved?.musicVolume==='number'?saved.musicVolume:35;music.setVolume(musicVolume/100);
 if(saved?.state){try{state=validateState(saved.state);nickname=typeof saved.nickname==='string'?saved.nickname.slice(0,24):nickname;listed=saved.listed!==false;if(mode==='local'){localOffline=settle(state).offlineEarned;state.lastSeen=Date.now();}}catch{}}
 if(mode==='cloud'&&Array.isArray(saved?.pending))pending=saved.pending.slice(0,32).filter(a=>a&&typeof a.id==='string'&&['click','buy','upgrade','golden','prestige','event_start','event_answer'].includes(a.type));
@@ -213,9 +216,26 @@ async function act(action){
   try{const result=applyAction(state,action);state.lastSeen=Date.now();save();render(true);if(action.type==='golden')toast(`Золотое открытие! +${fmt(result.reward||0)} ∫`);return true;}catch(error){toast(error.message);return false;}
 }
 let clickCredit=24,lastClickTime=performance.now(),audio;
+function prepareEffectAudio(){
+  if(!sound)return;
+  try{audio??=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume().catch(()=>{});}catch{}
+}
 function blip(kind='click'){
   if(!sound)return;
-  try{audio??=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();const osc=audio.createOscillator(),gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.type='sine';osc.frequency.setValueAtTime(kind==='buy'?660:400+Math.random()*160,audio.currentTime);osc.frequency.exponentialRampToValueAtTime(kind==='buy'?990:280,audio.currentTime+.07);gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.1);osc.start();osc.stop(audio.currentTime+.11);}catch{}
+  prepareEffectAudio();
+  if(kind==='golden'){
+    try{[659.25,830.61,987.77,1318.51,1661.22].forEach((frequency,index)=>{
+      const start=audio.currentTime+.025+index*.095;
+      for(const [harmonic,volume] of [[1,.055],[2,.012]]){
+        const osc=audio.createOscillator(),gain=audio.createGain();osc.type='sine';
+        osc.frequency.setValueAtTime(frequency*harmonic,start);
+        gain.gain.setValueAtTime(.0001,start);gain.gain.exponentialRampToValueAtTime(volume,start+.012);gain.gain.exponentialRampToValueAtTime(.0001,start+.7);
+        osc.connect(gain);gain.connect(audio.destination);osc.onended=()=>{osc.disconnect();gain.disconnect();};osc.start(start);osc.stop(start+.72);
+      }
+    });}catch{}
+    return;
+  }
+  try{const osc=audio.createOscillator(),gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.type='sine';osc.frequency.setValueAtTime(kind==='buy'?660:400+Math.random()*160,audio.currentTime);osc.frequency.exponentialRampToValueAtTime(kind==='buy'?990:280,audio.currentTime+.07);gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.1);osc.start();osc.stop(audio.currentTime+.11);}catch{}
 }
 function clickIntegral(event){
   if(readOnlyTab){showReadOnlyNotice();return;}
@@ -232,12 +252,13 @@ function clickIntegral(event){
 }
 $('#integral-button').addEventListener('click',clickIntegral);
 document.addEventListener('keydown',event=>{if(event.code==='Space'&&!event.repeat&&currentPage==='lab'&&!$$('dialog[open]').length&&!event.target.closest('input,textarea,button,a,summary,select')){event.preventDefault();clickIntegral();}});
-$('#golden-button').addEventListener('click',async()=>{if(readOnlyTab){showReadOnlyNotice();return;}if(goldenClaiming)return;goldenClaiming=true;$('#golden-button').hidden=true;try{await act({type:'golden'});}finally{goldenClaiming=false;render();}});
+$('#golden-button').addEventListener('click',async()=>{if(readOnlyTab){showReadOnlyNotice();return;}if(goldenClaiming)return;goldenClaiming=true;$('#golden-button').hidden=true;prepareEffectAudio();try{if(await act({type:'golden'}))blip('golden');}finally{goldenClaiming=false;render();}});
 function renderGolden(s,now){
   $('#golden-button').hidden=readOnlyTab||needsName||goldenClaiming||cinematicActive||Boolean($$('dialog[open]').length)||(mode==='cloud'&&!connected)||!(s.golden?.availableUntil>now&&s.golden?.nextAt<=now);
 }
 function maxQuantity(g,index,balance){let count=0;while(count<100&&priceFor(g.id,state.generators[index],count+1)<=balance)count++;return Math.max(1,count);}
 let lastShopStamp='',lastAchievementStamp='';
+const researchGroupsOpen={next:false,owned:false};
 function renderBalance(value){
   const balance=$('#balance'),label=fmt(value);
   if(balance.textContent!==label)balance.textContent=label;
@@ -264,7 +285,7 @@ function render(force=false){
   $('#goal-text').textContent=nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':s.totalEarned>=GENERATORS[nextIndex].basePrice?GENERATORS[nextIndex].name:'Неизвестный ресурс';
   $('#goal-progress').textContent=value>=goal?'Можно открыть':`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
   renderGolden(s,Date.now()+clockOffset);
-  const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),resourceDiscovered(s,i),quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>s.balance>=u.price),connected]);
+  const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),resourceDiscovered(s,i),quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>{const info=researchInfo(s,u.id);return info?[info.unlocked,info.affordable]:null;}),connected]);
   if(force||stamp!==lastShopStamp){lastShopStamp=stamp;renderShop(s);}
   const confirmedAchievements=mode==='cloud'?(state.achievements||[]):(s.achievements||[]);
   const freshlyEarned=confirmedAchievements.filter(id=>!earnedAchievements.has(id));
@@ -282,7 +303,7 @@ function render(force=false){
   if(currentPage==='achievements')renderAchievements(s);
   if(currentPage==='rewards')renderRewards(s);
   if(currentPage==='world')renderWorldEvents(s);
-  updateEventTimer();refreshResourceTooltip();
+  updateEventTimer();refreshResourceTooltip();refreshResearchTooltip();
   if(!storageAvailable){setStatus('Не сохранено','warning');$('#session-note').textContent='Браузер блокирует сохранение. Сделайте экспорт в профиле.';}
 }
 function renderShop(s){
@@ -291,12 +312,17 @@ function renderShop(s){
     return `<button class="generator-card ${affordable?'affordable':''} ${lock?'locked':''}" data-generator="${g.id}" data-count="${count}" aria-disabled="${!affordable}" aria-label="${lock?'Неизвестный ресурс':`Купить ${esc(g.name)}`}, ${count} шт., цена ${fmt(price)} интегралов"><span class="generator-icon icon-${i}"><img class="generator-image" src="${generatorIcon(i)}" alt="" width="52" height="52"></span><span class="generator-info"><h3>${lock?'???':esc(g.name)} <span class="generator-number">${count>1?`×${count}`:''}</span></h3><p>${lock?'Тайна следующего открытия.':esc(g.description)}</p><small>${lock?`Соберите ${fmt(g.basePrice,0)} ∫ за всё время`:`+${fmt(g.baseCps,2)} ∫/с · базовая скорость`}</small></span><span class="generator-meta"><strong>∫ ${fmt(price)}</strong><span>${s.generators[i]>0?`${s.generators[i]} в работе`:lock?'Впереди открытие':'Не приобретено'}</span></span></button>`;
   }).join('');
   $('#generators-panel').append($('#prestige-resource-template').content.cloneNode(true));
-  const orderedResearch=UPGRADES.map((u,i)=>({u,i,owned:s.upgrades.includes(u.id)})).sort((a,b)=>Number(a.owned)-Number(b.owned));
-  $('#upgrades-panel').innerHTML=orderedResearch.map(({u,i,owned},index)=>{
-    const r=u.requirement,gi=GENERATORS.findIndex(g=>g.id===r.itemId),unlocked=r.type==='clicks'?s.clicks>=r.amount:(s.generators[gi]||0)>=r.amount,affordable=unlocked&&s.balance>=u.price&&!owned;
-    const requirement=r.type==='clicks'?`${r.amount} кликов`:`${r.amount} × ${GENERATORS[gi]?.name||''}`;
-    const heading=index===0||owned!==orderedResearch[index-1].owned?`<h3 class="research-group-heading">${owned?'Изучено':'Ещё не изучено'} <span>${owned?s.upgrades.length:UPGRADES.length-s.upgrades.length}</span></h3>`:'';
-    return `${heading}<button class="upgrade-card ${owned?'purchased':''} ${affordable?'affordable':''}" data-upgrade="${u.id}" ${!affordable?'disabled':''}>${researchArtwork(i,owned)}<span class="generator-info"><h3>${esc(u.name)}</h3><p>${esc(u.description)}</p><small>${owned?'Исследование завершено':unlocked?'Доступно для исследования':`Откроется: ${esc(requirement)}`}</small></span><span class="generator-meta"><strong>${owned?'Готово':`∫ ${fmt(u.price)}`}</strong></span></button>`;
+  const orderedResearch=researchList(s).map(info=>({info,i:UPGRADES.findIndex(u=>u.id===info.id)}));
+  const tile=({info,i})=>{
+    const {id,name,resourceName,owned,unlocked,affordable,resourceIndex}=info;
+    const badge=resourceIndex<0?'<span class="research-resource-badge manual" aria-hidden="true">∫</span>':`<span class="research-resource-badge" aria-hidden="true"><img src="${generatorIcon(resourceIndex)}" alt="" width="22" height="22"></span>`;
+    return `<button type="button" class="research-tile ${owned?'purchased':''} ${affordable?'affordable':''} ${!unlocked?'locked':''}" data-upgrade="${id}" aria-label="${esc(name)}. ${esc(resourceName)}. ${owned?'Изучено':affordable?'Можно изучить':unlocked?'Недостаточно интегралов':'Нужны помощники или клики'}">${researchArtwork(i,owned)}${badge}${owned?'<span class="research-owned-mark" aria-hidden="true">✓</span>':''}</button>`;
+  };
+  const researchGroups=[['available','Доступно для покупки',info=>info.affordable],['next','Следующие улучшения',info=>!info.affordable&&!info.owned],['owned','Изучено',info=>info.owned]];
+  $('#upgrades-panel').innerHTML=researchGroups.map(([key,label,matches])=>{
+    const items=orderedResearch.filter(({info})=>matches(info));if(!items.length)return '';
+    const title=`${label} <span>${items.length}</span>`,grid=`<div class="research-group-grid">${items.map(tile).join('')}</div>`;
+    return key==='available'?`<section class="research-group"><h3 class="research-group-heading">${title}</h3>${grid}</section>`:`<details class="research-group" data-research-group="${key}" ${researchGroupsOpen[key]?'open':''}><summary class="research-group-heading">${title}</summary>${grid}</details>`;
   }).join('');
 }
 let resourceTipId=null,resourceTipMarkup='';
@@ -331,13 +357,64 @@ document.addEventListener('scroll',hideResourceTooltip,true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape')hideResourceTooltip();});
 window.addEventListener('resize',hideResourceTooltip);
 $('#generators-panel').addEventListener('click',async e=>{const b=e.target.closest('[data-generator]');if(b&&b.getAttribute('aria-disabled')!=='true'&&await act({type:'buy',itemId:b.dataset.generator,amount:Number(b.dataset.count)}))blip('buy');});
-$('#upgrades-panel').addEventListener('click',async e=>{const b=e.target.closest('[data-upgrade]');if(b&&await act({type:'upgrade',itemId:b.dataset.upgrade}))blip('buy');});
+let researchTipId=null,researchTipMarkup='',researchTouchPreview=false,researchPointerType='mouse',researchHideTimer;
+function hideResearchTooltip(){
+  clearTimeout(researchHideTimer);
+  researchTipId=null;researchTouchPreview=false;$('#research-tooltip').hidden=true;
+  $$('#upgrades-panel [aria-describedby="research-tooltip"]').forEach(card=>card.removeAttribute('aria-describedby'));
+}
+function refreshResearchTooltip(){
+  if(!researchTipId)return;
+  const card=$(`#upgrades-panel [data-upgrade="${researchTipId}"]`),tip=$('#research-tooltip'),s=projected(),info=researchInfo(s,researchTipId);
+  if(!card||!info||card.closest('details:not([open])')||currentPage!=='lab'||$('#upgrades-panel').hidden||$$('dialog[open]').length){hideResearchTooltip();return;}
+  const index=UPGRADES.findIndex(u=>u.id===info.id),condition=info.owned?'Исследование завершено':!info.unlocked?info.requirement:info.affordable?'Можно изучить':`Не хватает ${fmt(Math.max(0,info.price-s.balance),0)} ∫`;
+  const stamp=JSON.stringify([info.id,info.owned,info.unlocked,info.affordable]);
+  if(stamp!==researchTipMarkup){
+    tip.innerHTML=`<button type="button" class="research-tip-close" aria-label="Закрыть описание">×</button><header class="research-tip-heading">${researchArtwork(index,info.owned)}<div><h3 id="research-tip-title">${esc(info.name)}</h3><p class="resourceName">${esc(info.resourceName)}</p></div></header><p class="research-tip-description">${esc(info.description)}</p><div class="research-tip-price"><strong>${info.owned?'✓ Изучено':`∫ ${fmt(info.price,0).replace(/\u00a0/g,' ')}`}</strong></div><p class="research-tip-requirement">${esc(condition)}</p><div class="research-tip-action"><button type="button" class="onlymobile" ${!info.affordable?'disabled':''}>${info.owned?'Уже изучено':'Изучить улучшение'}</button></div>`;
+    researchTipMarkup=stamp;
+  }else tip.querySelector('.research-tip-requirement').textContent=condition;
+  tip.classList.toggle('touch-preview',researchTouchPreview);tip.setAttribute('role',researchTouchPreview?'dialog':'tooltip');
+  tip.setAttribute('aria-labelledby','research-tip-title');card.setAttribute('aria-describedby','research-tooltip');tip.hidden=false;
+  const rect=card.getBoundingClientRect();
+  tip.style.width='';tip.style.maxHeight='';
+  const {width,height}=tip.getBoundingClientRect();
+  const placement=researchTooltipPlacement({anchor:rect,width,height,viewportWidth:innerWidth,viewportHeight:innerHeight,bottomLimit:$('#statistics-panel').getBoundingClientRect().top-12});
+  tip.style.width=`${placement.width}px`;tip.style.maxHeight=`${placement.maxHeight}px`;
+  tip.style.left=`${placement.left}px`;tip.style.top=`${placement.top}px`;
+}
+function showResearchTooltip(card,touch=false){
+  clearTimeout(researchHideTimer);hideResourceTooltip();researchTipId=card.dataset.upgrade;researchTouchPreview=touch;refreshResearchTooltip();
+}
+async function buyResearch(id){
+  if(readOnlyTab){hideResearchTooltip();showReadOnlyNotice();return;}
+  const info=researchInfo(projected(),id);if(!info?.affordable)return;
+  if(await act({type:'upgrade',itemId:id})){hideResearchTooltip();blip('buy');}
+}
+$('#upgrades-panel').addEventListener('toggle',event=>{const group=event.target.closest?.('[data-research-group]');if(group?.isConnected){researchGroupsOpen[group.dataset.researchGroup]=group.open;if(!group.open)hideResearchTooltip();}},true);
+$('#upgrades-panel').addEventListener('pointerover',event=>{if(event.pointerType==='touch'||researchTouchPreview)return;const card=event.target.closest('[data-upgrade]');if(card)showResearchTooltip(card);});
+$('#upgrades-panel').addEventListener('pointerout',event=>{if(!researchTouchPreview&&!event.relatedTarget?.closest?.('#research-tooltip')&&event.relatedTarget?.closest?.('[data-upgrade]')?.dataset.upgrade!==researchTipId)researchHideTimer=setTimeout(hideResearchTooltip,180);});
+$('#research-tooltip').addEventListener('pointerenter',()=>clearTimeout(researchHideTimer));
+$('#research-tooltip').addEventListener('pointerleave',event=>{if(!researchTouchPreview&&event.relatedTarget?.closest?.('[data-upgrade]')?.dataset.upgrade!==researchTipId)hideResearchTooltip();});
+$('#upgrades-panel').addEventListener('pointerdown',event=>{researchPointerType=event.pointerType;});
+$('#upgrades-panel').addEventListener('focusin',event=>{if(researchTouchPreview)return;const card=event.target.closest('[data-upgrade]');if(card)showResearchTooltip(card);});
+$('#upgrades-panel').addEventListener('focusout',()=>{if(!researchTouchPreview)hideResearchTooltip();});
+$('#upgrades-panel').addEventListener('click',event=>{
+  const card=event.target.closest('[data-upgrade]');if(!card)return;
+  const touch=event.pointerType==='touch'||event.detail>0&&(researchPointerType==='touch'||matchMedia('(hover: none)').matches);
+  if(touch){showResearchTooltip(card,true);return;}
+  if(researchInfo(projected(),card.dataset.upgrade)?.affordable||readOnlyTab)buyResearch(card.dataset.upgrade);else showResearchTooltip(card);
+});
+$('#research-tooltip').addEventListener('click',event=>{if(event.target.closest('.research-tip-close'))hideResearchTooltip();else if(event.target.closest('button.onlymobile')&&!event.target.closest('button').disabled)buyResearch(researchTipId);});
+document.addEventListener('pointerdown',event=>{if(researchTouchPreview&&!event.target.closest('#research-tooltip,[data-upgrade]'))hideResearchTooltip();});
+document.addEventListener('scroll',event=>{if(!event.target.closest?.('#research-tooltip'))hideResearchTooltip();},true);
+document.addEventListener('keydown',event=>{if(event.key==='Escape')hideResearchTooltip();});
+window.addEventListener('resize',hideResearchTooltip);
 $$('[data-quantity]').forEach(b=>b.addEventListener('click',()=>{quantity=b.dataset.quantity==='max'?'max':Number(b.dataset.quantity);$$('[data-quantity]').forEach(n=>{n.classList.toggle('active',n===b);n.setAttribute('aria-pressed',String(n===b));});render(true);}));
-for(const tab of ['generators','upgrades'])$(`#tab-${tab}`).addEventListener('click',()=>{for(const t of ['generators','upgrades']){$(`#tab-${t}`).classList.toggle('active',t===tab);$(`#tab-${t}`).setAttribute('aria-selected',String(t===tab));$(`#${t}-panel`).hidden=t!==tab;}$('.quantity-switch').classList.toggle('research-mode',tab==='upgrades');});
+for(const tab of ['generators','upgrades'])$(`#tab-${tab}`).addEventListener('click',()=>{hideResearchTooltip();hideResourceTooltip();for(const t of ['generators','upgrades']){$(`#tab-${t}`).classList.toggle('active',t===tab);$(`#tab-${t}`).setAttribute('aria-selected',String(t===tab));$(`#${t}-panel`).hidden=t!==tab;}$('.quantity-switch').classList.toggle('research-mode',tab==='upgrades');});
 function showPage(page){
   if(cinematicActive&&page!=='world')return;
   if(!document.getElementById(`page-${page}`))return;
-  hideResourceTooltip();currentPage=page;$$('[data-page]').forEach(n=>{n.classList.toggle('active',n.dataset.page===page);n.setAttribute('aria-current',n.dataset.page===page?'page':'false');});
+  hideResourceTooltip();hideResearchTooltip();currentPage=page;$$('[data-page]').forEach(n=>{n.classList.toggle('active',n.dataset.page===page);n.setAttribute('aria-current',n.dataset.page===page?'page':'false');});
   $$('.page-panel').forEach(p=>p.hidden=p.id!==`page-${page}`);
   if(page==='ranking')loadRanking();render(true);
   if(page==='world')world.resize();
@@ -374,6 +451,9 @@ $('#cosmetics-panel').addEventListener('click',e=>{
   selectedCosmetic=b.dataset.cosmetic;save();render(true);toast(`Оформление: ${appearance.name}`);
 });
 async function loadRanking(){
+  const refresh=$('#refresh-ranking');if(refresh.disabled)return;
+  refresh.disabled=true;refresh.setAttribute('aria-busy','true');
+  const label=refresh.querySelector('.refresh-label');if(label)label.textContent='Обновляем…';
   const content=$('#ranking-content');
   content.innerHTML='<div class="empty-state"><span>◎</span><h2>Связываемся с лабораториями мира…</h2></div>';
   try{const {entries}=await request('/leaderboard?period=all');
@@ -381,7 +461,7 @@ async function loadRanking(){
     content.innerHTML=`<table class="ranking-table"><caption>Места по интегралам за всё время · первые 100 игроков</caption><thead><tr><th scope="col">Место</th><th scope="col">Исследователь</th><th scope="col">Интегралы</th><th scope="col">Престиж</th></tr></thead><tbody>${entries.map(p=>`<tr class="ranking-row ${p.rank<=3?`rank-top rank-${p.rank}`:''} ${p.id===state.id?'is-me':''}" data-rank="${p.rank}"><td class="rank-place" data-label="Место"><span aria-hidden="true">${p.rank<=3?['🥇','🥈','🥉'][p.rank-1]:''}</span><strong>№ ${fmt(p.rank,0)}</strong></td><td class="rank-player"><span class="rank-avatar" aria-hidden="true">${esc(profileEmoji(p.emoji))}</span><span class="rank-name rank-identity">${esc(p.nickname)}${p.id===state.id?'<small>Это вы</small>':''}</span></td><td class="rank-score" data-label="Интегралы"><strong>${fmt(p.totalEarned,2)} ∫</strong><small>${Number.isFinite(p.balance)?`На балансе: ${fmt(p.balance,2)} ∫`:'За всё время'}</small></td><td class="rank-prestige" data-label="Престиж"><strong>∞ ${fmt(p.prestige,0)}</strong></td></tr>`).join('')}</tbody></table>`;
   }catch(error){
     content.innerHTML=`<div class="empty-state"><span>◎</span><h2>Рейтинг временно недоступен.</h2><p>${error.code==='storage_unavailable'?'Облачное хранилище ещё подключается. Прогресс в браузере продолжает сохраняться.':'Не удалось связаться с сервером. Попробуйте обновить рейтинг немного позже.'}</p><button class="secondary-button" id="retry-ranking">Попробовать снова</button></div>`;$('#retry-ranking').addEventListener('click',loadRanking);
-  }
+  }finally{refresh.disabled=false;refresh.setAttribute('aria-busy','false');if(label)label.textContent='Обновить';}
 }
 $('#refresh-ranking').addEventListener('click',loadRanking);
 $$('[data-close]').forEach(b=>b.addEventListener('click',()=>b.closest('dialog').close()));
@@ -389,7 +469,7 @@ $$('dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d&&d.id!=='
 let portalResumeMusic=false;
 const portalGames={kozlogon:{name:'Kozlogon',url:'https://blumbutta.github.io/kozlogon/'},cube:{name:'CubeBomber',url:'https://blumbutta.github.io/cube-bomber/'}};
 $$('[data-portal-game]').forEach(link=>link.addEventListener('click',event=>{event.preventDefault();const game=portalGames[link.dataset.portalGame];if(!game)return;portalResumeMusic=music.playing;music.pause();updateMusic();$('#portal-game-title').textContent=game.name;$('#portal-game-frame').title=game.name;$('#portal-game-frame').src=game.url;$('#portal-game-dialog').showModal();}));
-$('#portal-game-dialog').addEventListener('close',()=>{$('#portal-game-frame').src='about:blank';if(portalResumeMusic&&!document.hidden)music.resume().then(updateMusic).catch(()=>{});portalResumeMusic=false;});
+$('#portal-game-dialog').addEventListener('close',()=>{$('#portal-game-frame').src='about:blank';if(musicEnabled)startPreferredMusic();portalResumeMusic=false;});
 $('#help-open').addEventListener('click',()=>$('#help-dialog').showModal());
 function renderEmojiPicker(){
   $('#emoji-options').innerHTML=PROFILE_EMOJIS.map(value=>`<button type="button" class="emoji-option ${value===draftEmoji?'selected':''}" data-emoji="${value}" aria-label="Эмодзи ${value}" aria-pressed="${value===draftEmoji}">${value}</button>`).join('');
@@ -516,8 +596,8 @@ $('#prestige-final-confirm').addEventListener('click',async()=>{
   finally{
     prestigeAudio.stop();setCinematicUI(false);prestigeSubmitting=false;$('#prestige-final-confirm').disabled=false;
     render(true);
-    if(resumeMusic&&!document.hidden){resumeMusicAfterVisibility=false;music.resume().then(updateMusic).catch(()=>{});}
-    else if(resumeMusic)resumeMusicAfterVisibility=true;
+    if(musicEnabled&&!document.hidden){resumeMusicAfterVisibility=false;startPreferredMusic();}
+    else if(musicEnabled)resumeMusicAfterVisibility=true;
     if(succeeded){$('#world-cinematic-status').textContent=`Эпоха ${fmt(state.prestigeCount,0)} · ${appearance.name}. Новый мир ждёт первых жителей.`;toast(`Перерождение №${fmt(state.prestigeCount,0)}. Облик «${appearance.name}» добавлен в награды.`);}
   }
 });
@@ -537,7 +617,8 @@ setInterval(()=>{if(readOnlyTab)return;if(mode==='cloud'&&(clickBuffer||pending.
 setInterval(()=>{if(readOnlyTab)return;if(mode==='local'){save();return;}syncCloud();},15000);
 window.addEventListener('online',()=>syncCloud(true));
 document.addEventListener('visibilitychange',()=>{if(readOnlyTab)return;if(document.hidden){if(mode==='cloud'){queueClicks();flush();}save();}else if(mode==='cloud'){syncCloud();}else if(mode==='local'){const r=settle(state);state.lastSeen=Date.now();if(r.offlineEarned>0)showOffline(r.offlineEarned);}});
-document.addEventListener('visibilitychange',()=>{if(document.hidden){resumeMusicAfterVisibility=resumeMusicAfterVisibility||music.playing;music.pause();prestigeAudio.stop();}else if(resumeMusicAfterVisibility&&!cinematicActive){resumeMusicAfterVisibility=false;music.resume().then(updateMusic).catch(()=>{});}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){music.pause();prestigeAudio.stop();updateMusic();}else startPreferredMusic();});
+window.addEventListener('storage',event=>{if(event.key===MUSIC_KEY){musicEnabled=event.newValue!=='off';if(!musicEnabled)music.pause();else startPreferredMusic();updateMusic();}});
 window.addEventListener('storage',event=>{if(readOnlyTab&&event.key===STORAGE&&event.newValue){try{const other=JSON.parse(event.newValue);state=validateState(other.state);nickname=other.nickname;emoji=profileEmoji(other.emoji);token=readStorage(TOKEN_KEY);mode=other.mode;listed=other.listed;earnedAchievements=new Set((other.achievements||[]).filter(validAchievement));selectedCosmetic=other.selectedCosmetic||'classic';render(true);}catch{}}});
 window.addEventListener('pagehide',()=>{if(mode==='cloud')queueClicks();save();});
 
@@ -664,8 +745,25 @@ function updateEventTimer(){
     else if(state.lastEventResult.at>=Date.now()+clockOffset-30000)toast(state.lastEventResult.outcome==='win'?`Испытание пройдено: +${fmt(state.lastEventResult.reward)} ∫`:`Испытание завершено: −${fmt(state.lastEventResult.penalty)} ∫`);
   }
 }
-function updateMusic(){const b=$('#music-button');b.classList.toggle('playing',music.playing);b.setAttribute('aria-pressed',String(music.playing));b.setAttribute('aria-label',music.playing?'Выключить музыку':'Включить музыку');b.title=music.playing?'Выключить музыку':'Включить музыку';b.textContent=music.playing?'Ⅱ':'▶';}
-$('#music-button').addEventListener('click',async()=>{resumeMusicAfterVisibility=false;try{await music.toggle();updateMusic();}catch{toast('Браузер не смог включить музыку. Попробуйте ещё раз.');}});
+function updateMusic(){
+  const b=$('#music-button');b.classList.toggle('playing',music.playing);b.setAttribute('aria-pressed',String(musicEnabled));
+  b.setAttribute('aria-label',musicEnabled?'Выключить музыку':'Включить музыку');
+  b.title=musicEnabled?(music.playing?'Выключить музыку':readOnlyTab?'Музыка включена в активной вкладке':'Музыка включена · начнётся после первого нажатия'):'Включить музыку';b.textContent=musicEnabled?'Ⅱ':'▶';
+}
+async function startPreferredMusic(){
+  if(!musicEnabled||readOnlyTab||document.hidden||cinematicActive||$('#portal-game-dialog').open)return false;
+  try{return await music.start();}catch{return false;}finally{updateMusic();}
+}
+$('#music-button').addEventListener('click',()=>{
+  musicEnabled=!musicEnabled;writeStorage(MUSIC_KEY,musicEnabled?'on':'off');resumeMusicAfterVisibility=false;
+  if(musicEnabled)startPreferredMusic();else music.pause();updateMusic();
+});
+function unlockPreferredMusic(event){
+  if(!event.isTrusted||event.target.closest?.('#music-button')||music.playing)return;
+  startPreferredMusic();
+}
+document.addEventListener('pointerdown',unlockPreferredMusic);
+document.addEventListener('keydown',unlockPreferredMusic);
 $('#music-volume').value=musicVolume;$('#music-volume-value').textContent=`${musicVolume}%`;
 $('#music-volume').addEventListener('input',e=>{musicVolume=Number(e.target.value);music.setVolume(musicVolume/100);$('#music-volume-value').textContent=`${musicVolume}%`;save();});
 $('#open-events')?.addEventListener('click',()=>openWorldEvents());
@@ -677,4 +775,4 @@ const topbarResize=new ResizeObserver(entries=>{document.documentElement.style.s
 const world=createLabWorld($('#world-canvas'),{onInspect:resident=>toast(`${resident.name} ×${fmt(resident.count,0)} · ${resident.task}`),onLocation:location=>{
   if(cinematicActive)return;openWorldEvents(location.id);
 }});
-updateSound();updateMusic();render(true);init();
+updateSound();updateMusic();render(true);init();startPreferredMusic();

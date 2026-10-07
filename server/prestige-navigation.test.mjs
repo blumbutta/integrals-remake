@@ -51,7 +51,7 @@ function harness({decision=async()=>true,animation=Promise.resolve()}={}){
   context=createContext({
     state,currentPage:'lab',prestigeSubmitting:false,readOnlyTab:false,
     cinematicActive:false,cinematicSound:true,selectedCosmetic:'classic',prestigePage:0,
-    appearance:prestigeAppearance(0),musicVolume:20,resumeMusicAfterVisibility:false,
+    appearance:prestigeAppearance(0),musicVolume:20,musicEnabled:true,resumeMusicAfterVisibility:false,
     PRESTIGE_PRICE,getStats,prestigeAppearance,structuredClone,$:element,
     projected:()=>context.state,fmt:value=>String(value),esc:value=>String(value),
     showReadOnlyNotice(){calls.push('read-only');},
@@ -71,7 +71,7 @@ function harness({decision=async()=>true,animation=Promise.resolve()}={}){
     },
     prestigeAudio:{prepare(){calls.push('audio:prepare');},play(){calls.push('audio:play');},stop(){calls.push('audio:stop');}},
     music:{playing:false,pause(){calls.push('music:pause');},resume:async()=>{}},
-    updateMusic(){},matchMedia:()=>({matches:false}),document:{hidden:false},
+    updateMusic(){},startPreferredMusic(){calls.push('music:start-preferred');},matchMedia:()=>({matches:false}),document:{hidden:false},
     selectedAppearance:next=>prestigeAppearance(next.prestigeCount),
   });
   new Script(source,{filename:'app.mjs:prestige-navigation'}).runInContext(context);
@@ -123,6 +123,16 @@ test('only the accepted second confirmation opens the world, then plays the prev
   animation.resolve();await first;
   assert.equal(h.context.prestigeSubmitting,false);assert.equal(h.context.cinematicActive,false);
   assert.equal(h.element('#prestige-final-confirm').disabled,false);assert.equal(h.context.selectedCosmetic,'prestige');
+  assert.ok(h.calls.indexOf('cinematic:false')<h.calls.indexOf('music:start-preferred'),'preferred ambient music resumes after the cinematic ends');
+});
+
+test('prestige completion respects disabled music and a hidden page',async()=>{
+  for(const [enabled,hidden] of [[false,false],[true,true]]){
+    const h=harness();h.context.musicEnabled=enabled;h.context.document.hidden=hidden;
+    h.context.openPrestige();h.fire('#prestige-confirm');await h.fire('#prestige-final-confirm');
+    assert.equal(h.context.state.prestigeCount,1);assert.equal(h.calls.includes('music:start-preferred'),false);
+    assert.equal(h.context.musicEnabled,enabled,'temporary cinematic pauses do not change the stored preference');
+  }
 });
 
 test('a refused or failed prestige leaves the current world, account and theme intact',async()=>{
