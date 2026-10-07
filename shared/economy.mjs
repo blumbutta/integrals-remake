@@ -16,6 +16,7 @@ export const GENERATORS = Object.freeze([
   {id:'dimension',name:'Портал',description:'Доставляет интегралы из другого измерения.',basePrice:700000000,baseCps:160000,icon:'◇'},
   {id:'universe',name:'Машина времени',description:'Будущие вычисления уже готовы сегодня.',basePrice:14000000000,baseCps:1100000,icon:'✧'},
   {id:'multiverse',name:'Глубокая мысль',description:'Ищет главный ответ среди бесконечных чисел.',basePrice:300000000000,baseCps:8000000,icon:'∞'},
+  {id:'superintelligence',name:'Сверхразум ИИ',description:'Открывает математику за пределами человеческого воображения.',basePrice:10_000_000_000_000,baseCps:240_000_000,icon:'✺'},
 ]);
 export const UPGRADES = Object.freeze([
   {id:'click-1',name:'Острый карандаш',description:'Сила клика ×2.',price:100,target:'click',multiplier:2,requirement:{type:'clicks',amount:25}},
@@ -23,7 +24,7 @@ export const UPGRADES = Object.freeze([
   {id:'click-3',name:'Поток сознания',description:'Сила клика ×2.',price:25000,target:'click',multiplier:2,requirement:{type:'clicks',amount:500}},
   {id:'click-4',name:'Чистая математика',description:'Сила клика ×2.',price:1000000,target:'click',multiplier:2,requirement:{type:'clicks',amount:2000}},
   ...GENERATORS.flatMap((g,i)=>[
-    {id:g.id+'-1',name:['Двойной импульс','Пять с плюсом','Красный диплом','Новый учебный план','Разгон процессора','Фундаментальный труд','Самообучение','Стабильный переход','Петля времени','Ответ 42'][i],description:g.name+': производство ×2.',price:g.basePrice*12,target:g.id,multiplier:2,requirement:{type:'generator',itemId:g.id,amount:10}},
+    {id:g.id+'-1',name:['Двойной импульс','Пять с плюсом','Красный диплом','Новый учебный план','Разгон процессора','Фундаментальный труд','Самообучение','Стабильный переход','Петля времени','Ответ 42','Рекурсивное озарение'][i],description:g.name+': производство ×2.',price:g.basePrice*12,target:g.id,multiplier:2,requirement:{type:'generator',itemId:g.id,amount:10}},
     {id:g.id+'-2',name:g.name+' · совершенство',description:g.name+': производство ещё ×2.',price:g.basePrice*120,target:g.id,multiplier:2,requirement:{type:'generator',itemId:g.id,amount:25}},
   ]),
 ]);
@@ -36,6 +37,14 @@ const bounded=value=>Math.min(1e250,Math.max(0,value));
 const schedule=(now,random=Math.random)=>now+90_000+Math.floor(Math.max(0,Math.min(0.99999999,random()))*90_001);
 export function createState(now=Date.now()) {
   return {version:1,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
+}
+// Append the new stage without resetting valid progress, peak records or active stakes.
+// This is a schema migration; callers still validate untrusted imported saves.
+export function migrateState(state) {
+  for(const slots of [state.generators,state.achievementRecords?.generators]){
+    if(Array.isArray(slots)&&slots.length===10)while(slots.length<GENERATORS.length)slots.push(0);
+  }
+  return state;
 }
 export function priceFor(itemId,owned,amount=1) {
   const g=typeof itemId==='number'?GENERATORS[itemId]:GENERATORS.find(x=>x.id===itemId);
@@ -50,13 +59,14 @@ export function getStats(state) {
   const multiplier=1+state.prestige*0.1;
   let clickPower=1,cps=0;
   for(const u of UPGRADES)if(u.target==='click'&&state.upgrades.includes(u.id))clickPower*=u.multiplier;
-  GENERATORS.forEach((g,i)=>{let rate=g.baseCps*state.generators[i];for(const u of UPGRADES)if(u.target===g.id&&state.upgrades.includes(u.id))rate*=u.multiplier;cps+=rate;});
+  GENERATORS.forEach((g,i)=>{let rate=g.baseCps*(state.generators[i]??0);for(const u of UPGRADES)if(u.target===g.id&&state.upgrades.includes(u.id))rate*=u.multiplier;cps+=rate;});
   return {cps:bounded(cps*multiplier),clickPower:bounded(clickPower*multiplier),multiplier,prestigeGain:Math.floor(Math.sqrt(state.runEarned/1_000_000))};
 }
 function credit(state,value){const safe=bounded(value);state.balance=bounded(state.balance+safe);state.totalEarned=bounded(state.totalEarned+safe);state.runEarned=bounded(state.runEarned+safe);return safe;}
 function finished(state,result){unlockAchievements(state,getStats(state));return result;}
 export function settle(state,now=Date.now()) {
   if(!Number.isFinite(now))fail('invalid_time','Некорректное время.');
+  migrateState(state);
   const until=Math.max(state.lastSettled,now),from=state.lastSettled;
   const activeEnd=state.lastSeen+ACTIVE_GRACE_MS;
   const activeMs=Math.max(0,Math.min(until,activeEnd)-from);

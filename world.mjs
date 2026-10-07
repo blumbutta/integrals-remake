@@ -2,7 +2,7 @@ import {GENERATORS} from './shared/economy.mjs';
 
 const W=1200,H=760,ACTOR_LIMIT=45,PARTICLE_LIMIT=70,FRAME_MS=1000/30;
 const HUB={x:592,y:533},HOLE={x:651,y:125};
-const FILES=['cursoricon.png','grandmaIcon.png','farmIcon.png','factoryIcon.png','mineIcon.png','shipmentIcon.png','alchemylabIcon.png','portalIcon.png','timemachineIcon.png','antimattercondenserIcon.png'];
+const FILES=['cursoricon.png','grandmaIcon.png','farmIcon.png','factoryIcon.png','mineIcon.png','shipmentIcon.png','alchemylabIcon.png','portalIcon.png','timemachineIcon.png','antimattercondenserIcon.png'].map(file=>`./assets/original/${file}`).concat('./assets/custom/superintelligence.png');
 const LOCATIONS=[
   {id:'school',name:'Школа',generatorIndices:[1,3],x:207,y:412,bounds:[68,279,283,233],label:[207,538],unlock:'Школьник · преподаватель'},
   {id:'university',name:'Университет',generatorIndices:[2,5],x:447,y:286,bounds:[316,176,260,203],label:[447,400],unlock:'Студент · профессор'},
@@ -10,9 +10,10 @@ const LOCATIONS=[
   {id:'portals',name:'Портальные острова',generatorIndices:[7],x:967,y:147,bounds:[867,52,227,187],label:[979,262],unlock:'Откройте портал'},
   {id:'observatory',name:'Обсерватория времени',generatorIndices:[8],x:688,y:231,bounds:[582,115,233,204],label:[697,331],unlock:'Машина времени'},
   {id:'thought',name:'Башня Глубокой мысли',generatorIndices:[9],x:1100,y:367,bounds:[1039,271,143,185],label:[1100,485],unlock:'Глубокая мысль'},
+  {id:'orbitalmind',name:'Орбитальный сверхразум',generatorIndices:[10],x:238,y:105,bounds:[131,25,214,151],label:[238,191],unlock:'Сверхразум ИИ'},
 ];
-const HOMES=[{x:585,y:544,size:30},{x:167,y:493,size:47},{x:408,y:353,size:51},{x:267,y:480,size:65},{x:823,y:525,size:48},{x:491,y:350,size:51},{x:958,y:495,size:42},{x:967,y:167,size:77},{x:687,y:235,size:55},{x:1101,y:370,size:75}];
-const TASKS=[['Собирает новую идею','Доставляет интегралы в центр'],['Решает домашнее задание','Считает пример в тетради'],['Готовится к сессии','Ищет первообразную'],['Объясняет решение у доски','Проверяет школьные работы'],['Вычисляет численный интеграл','Обрабатывает новые данные'],['Доказывает новую теорему','Читает научный доклад'],['Обучает математическую модель','Сопоставляет закономерности'],['Принимает идеи другого измерения','Стабилизирует портал'],['Возвращает вычисления из будущего','Сверяет научное время'],['Ищет главный ответ','Размышляет о бесконечности']];
+const HOMES=[{x:585,y:544,size:30},{x:167,y:493,size:47},{x:408,y:353,size:51},{x:267,y:480,size:65},{x:823,y:525,size:48},{x:491,y:350,size:51},{x:958,y:495,size:42},{x:967,y:167,size:77},{x:687,y:235,size:55},{x:1101,y:370,size:75},{x:238,y:156,size:102}];
+const TASKS=[['Собирает новую идею','Доставляет интегралы в центр'],['Решает домашнее задание','Считает пример в тетради'],['Готовится к сессии','Ищет первообразную'],['Объясняет решение у доски','Проверяет школьные работы'],['Вычисляет численный интеграл','Обрабатывает новые данные'],['Доказывает новую теорему','Читает научный доклад'],['Обучает математическую модель','Сопоставляет закономерности'],['Принимает идеи другого измерения','Стабилизирует портал'],['Возвращает вычисления из будущего','Сверяет научное время'],['Ищет главный ответ','Размышляет о бесконечности'],['Открывает новую математическую аксиому','Объединяет мысли целой вселенной']];
 const GLYPHS=['∫','x²','+ C','Σ','dx','π','λ','∞'];
 const seed=n=>{const v=Math.sin(n*127.1+311.7)*43758.5453;return v-Math.floor(v);};
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -24,16 +25,17 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   if(!ctx)return {update(){},burst(){},setPaused(){},get paused(){return true;},resize(){},destroy(){},playPrestige(){return Promise.resolve();},finishPrestige(){}};
   let destroyed=false,manualPaused=false,inView=true,raf=0,lastFrame=0,time=0;
   let width=W,height=H,dpr=1,scale=1,ox=0,oy=0,flash=0,flashTimer=0,lastInspection=-Infinity;
+  let view={left:0,top:0,right:W,bottom:H};
   let actors=[],particles=[],waves=[],hitAreas=[],cinema=null;
   const media=window.matchMedia?.('(prefers-reduced-motion: reduce)');let reduced=!!media?.matches;
   const snapshot=(state={},options={})=>{
-    const counts=Array.from({length:10},(_,i)=>Number.isFinite(state.generators?.[i])?Math.max(0,Math.floor(state.generators[i])):0);
+    const counts=Array.from({length:GENERATORS.length},(_,i)=>Number.isFinite(state.generators?.[i])?Math.max(0,Math.floor(state.generators[i])):0);
     const prestige=Number.isFinite(state.prestige)?Math.max(0,state.prestige):0;
     const hue=Number.isFinite(Number(options.hue))?((Number(options.hue)%360)+360)%360:206+Math.min(65,Math.log2(prestige+1)*5);
     return {counts,prestige,hue,accent:typeof options.accent==='string'?options.accent:'#a8f4ef',total:counts.reduce((a,b)=>a+b,0)};
   };
   let latest=snapshot(),shown=latest;
-  const images=FILES.map(file=>{const image=new Image();image.decoding='async';image.onload=image.onerror=()=>{if(!destroyed)draw();};image.src=new URL(`./assets/original/${file}`,import.meta.url).href;return image;});
+  const images=FILES.map(file=>{const image=new Image();image.decoding='async';image.onload=image.onerror=()=>{if(!destroyed)draw();};image.src=new URL(file,import.meta.url).href;return image;});
   const tint=(light=70,alpha=1,hue=shown.hue)=>`hsla(${hue},65%,${light}%,${alpha})`;
   const available=l=>l.generatorIndices.some(i=>shown.counts[i]>0);
   function rr(x,y,w,h,r,fill,stroke,lw=1){ctx.beginPath();ctx.roundRect(x,y,w,h,r);if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.stroke();}}
@@ -44,7 +46,14 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function glow(x,y,r,color,alpha=.2){ctx.save();ctx.globalAlpha=alpha;const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,color);g.addColorStop(1,'transparent');ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2);ctx.restore();}
   function imageAt(type,x,y,size,alpha=1,angle=0){
     const image=images[type];ctx.save();ctx.globalAlpha*=alpha;ctx.translate(x,y);ctx.rotate(angle);
-    if(image.complete&&image.naturalWidth){const w=Math.min(size*image.naturalWidth/image.naturalHeight,size*1.62);ctx.drawImage(image,-w/2,-size,w,size);}else text(['↖','π','Σ','λ','⌘','∫','●','◉','◷','∞'][type],0,-size*.15,size*.7,tint(82),'Georgia, serif','center');ctx.restore();
+    if(image.complete&&image.naturalWidth){
+      if(type===10){
+        // Frame the supplied artwork as the core: keep its brain, crop the city below it.
+        ctx.beginPath();ctx.ellipse(0,-size/2,size/2,size/2,0,0,Math.PI*2);ctx.clip();
+        const side=image.naturalWidth*.84;ctx.drawImage(image,image.naturalWidth*.08,image.naturalHeight*.157,side,side,-size/2,-size,size,size);
+        const shade=ctx.createRadialGradient(0,-size/2,size*.27,0,-size/2,size*.52);shade.addColorStop(0,'transparent');shade.addColorStop(1,'rgba(3,28,49,.72)');ctx.fillStyle=shade;ctx.fillRect(-size/2,-size,size,size);
+      }else{const w=Math.min(size*image.naturalWidth/image.naturalHeight,size*1.62);ctx.drawImage(image,-w/2,-size,w,size);}
+    }else text(['↖','π','Σ','λ','⌘','∫','●','◉','◷','∞','✺'][type],0,-size*.15,size*.7,tint(82),'Georgia, serif','center');ctx.restore();
   }
   function progress(){return cinema?clamp((performance.now()-cinema.started)/cinema.duration,0,1):0;}
   function object(x,y,key,paint){
@@ -75,25 +84,26 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function sky(){
     const p=progress(),space=cinema&&!cinema.reduced?(p<.84?smooth((p-.28)/.46):1-smooth((p-.84)/.14)):0;
     const groundColor=`rgb(${Math.round(36-30*space)},${Math.round(71-49*space)},${Math.round(63-22*space)})`;
-    const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#061629');g.addColorStop(.4,'#18374b');g.addColorStop(1,groundColor);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#061629');g.addColorStop(.4,'#18374b');g.addColorStop(1,groundColor);ctx.fillStyle=g;ctx.fillRect(view.left,view.top,view.right-view.left,view.bottom-view.top);
     glow(680,200,430,tint(38),.13);glow(265,149,265,'#91afad',.06);
-    for(let i=0;i<125;i++){const x=seed(i+8)*W,y=seed(i+37)*370,r=i%17===0?1.5:.6;ellipse(x,y,r,r,`rgba(215,237,230,${.15+seed(i+73)*.42+(reduced?0:Math.sin(time*.5+i)*.06)})`);}
+    for(let i=0;i<125;i++){const x=view.left+seed(i+8)*(view.right-view.left),y=view.top+seed(i+37)*(370-view.top),r=i%17===0?1.5:.6;ellipse(x,y,r,r,`rgba(215,237,230,${.15+seed(i+73)*.42+(reduced?0:Math.sin(time*.5+i)*.06)})`);}
     glow(110,92,67,'#b6d7d7',.12);ellipse(110,92,26,26,'#d0d6c0');ellipse(121,84,24,25,'#11263a');
     landLayer(600,480,.28,.75,()=>{
-      for(let layer=0;layer<3;layer++){const y=235+layer*40,points=[[0,H],[0,y+30]];for(let x=0;x<=W;x+=65)points.push([x,y-25-seed(x+layer*83)*75]);points.push([W,H]);poly(points,['#163447','#1d404d','#285057'][layer]);}
+      const step=Math.max(65,Math.ceil((view.right-view.left)/6500)*65);
+      for(let layer=0;layer<3;layer++){const y=235+layer*40,points=[[view.left,view.bottom],[view.left,y+30]];for(let x=Math.floor(view.left/step)*step;x<=view.right+step;x+=step)points.push([x,y-25-seed(x+layer*83)*75]);points.push([view.right,view.bottom]);poly(points,['#163447','#1d404d','#285057'][layer]);}
     });
     if(shown.total&&!reduced&&!cinema){const phase=(time+9)%31;if(phase<1.3){const x=230+phase*390,y=49+phase*82;line([[x-78,y-19],[x,y]],'rgba(206,243,241,.35)',1);glow(x,y,12,'#cafff4',.27);}}
     // Faint constellations keep the sky spacious without being an empty block.
     const points=[[457,65],[489,36],[532,56],[547,91],[515,113]];line(points,'rgba(162,208,210,.11)',.8);for(const [x,y]of points)ellipse(x,y,1.4,1.4,'#8aa9b5');
   }
   function terrain(){
-    poly([[0,428],[153,366],[288,397],[439,325],[647,355],[782,309],[982,359],[1200,425],[1200,760],[0,760]],'#244944');
-    poly([[0,567],[123,472],[327,471],[520,424],[654,443],[781,400],[1002,462],[1200,491],[1200,760],[0,760]],'#2b5145');
-    poly([[0,671],[203,611],[348,655],[595,596],[785,667],[1056,607],[1200,641],[1200,760],[0,760]],'#2b4c3d');
+    poly([[view.left,428],[0,428],[153,366],[288,397],[439,325],[647,355],[782,309],[982,359],[1200,425],[view.right,425],[view.right,view.bottom],[view.left,view.bottom]],'#244944');
+    poly([[view.left,567],[0,567],[123,472],[327,471],[520,424],[654,443],[781,400],[1002,462],[1200,491],[view.right,491],[view.right,view.bottom],[view.left,view.bottom]],'#2b5145');
+    poly([[view.left,671],[0,671],[203,611],[348,655],[595,596],[785,667],[1056,607],[1200,641],[view.right,641],[view.right,view.bottom],[view.left,view.bottom]],'#2b4c3d');
     const routes=[[[150,493],[315,550],[453,481],[HUB.x,HUB.y]],[[437,343],[480,414],[511,487],[HUB.x,HUB.y]],[[HUB.x,HUB.y],[741,606],[849,560],[951,520]],[[701,267],[679,351],[727,406],[808,480]],[[971,508],[1034,459],[1060,410],[1102,399]]];
     for(const route of routes){ctx.beginPath();ctx.moveTo(...route[0]);ctx.bezierCurveTo(...route[1],...route[2],...route[3]);ctx.lineWidth=27;ctx.strokeStyle='#183a36';ctx.stroke();ctx.lineWidth=19;ctx.strokeStyle='#819281';ctx.stroke();ctx.lineWidth=1;ctx.strokeStyle='rgba(204,210,165,.36)';ctx.setLineDash([3,8]);ctx.stroke();ctx.setLineDash([]);}
     // River beneath the island and small pedestrian bridges.
-    ctx.beginPath();ctx.moveTo(930,760);ctx.bezierCurveTo(795,657,1041,664,1080,568);ctx.bezierCurveTo(1118,480,1183,497,1223,528);ctx.strokeStyle='#142f38';ctx.lineWidth=65;ctx.stroke();ctx.strokeStyle='#35636a';ctx.lineWidth=47;ctx.stroke();
+    ctx.beginPath();ctx.moveTo(930,view.bottom+35);ctx.bezierCurveTo(795,657,1041,664,1080,568);ctx.bezierCurveTo(1118,480,1183,497,Math.max(1223,view.right+35),528);ctx.strokeStyle='#142f38';ctx.lineWidth=65;ctx.stroke();ctx.strokeStyle='#35636a';ctx.lineWidth=47;ctx.stroke();
     for(let i=0;i<13;i++){const x=990+Math.sin(i*1.2)*48,y=584+i*13;line([[x,y],[x+19,y-2]],'rgba(151,208,202,.14)',1);}
     for(let i=0;i<7;i++)line([[1043+i*5,602-i*2],[1065+i*5,622-i*2]],'#bba875',4);
     // Grass and stones are deterministic and do not allocate during a frame.
@@ -109,6 +119,8 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function nature(){
     const trees=[[39,555,1.15],[67,580,.75],[322,604,1.1],[355,622,.8],[743,629,1.1],[778,649,.8],[1068,524,.65],[1163,569,1.1],[84,366,.8],[290,282,.9],[566,379,.75],[812,294,.75],[758,322,.7],[36,643,.95],[475,694,.65]];
     trees.forEach(([x,y,s],i)=>tree(x,y,s,i));
+    for(let x=Math.floor(view.left/105)*105,n=0;x<-30&&n<12;x+=105,n++)tree(x,534+seed(x+217)*116,.65+seed(x+323)*.38,x+1200);
+    for(let x=W+66,n=0;x<view.right+30&&n<12;x+=105,n++)tree(x,586+seed(x+217)*82,.65+seed(x+323)*.38,x+1200);
     for(const [x,y]of [[311,512],[477,440],[739,558],[779,387],[1038,462]])object(x,y,800+x,()=>{line([[x,y],[x,y-27]],'#213734',3);glow(x,y-31,25,'#f3cf82',.18);rr(x-4,y-38,8,11,3,'#e6c27e','#837459');ellipse(x,y+2,5,2,'#1d3c34');});
   }
   function pad(x,y,w,h){ellipse(x,y+6,w*.55,h*.52,'rgba(7,27,30,.28)');poly([[x-w/2,y-h/2],[x+w*.39,y-h/2],[x+w/2,y+h*.25],[x-w*.4,y+h/2]],'#5f7666','#92a18b',1);}
@@ -182,7 +194,21 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     line([[1101,284],[1101,257]],'#b8cfd0',2);ellipse(1101,252,4,4,tint(82));glow(1101,280,49,tint(64),.2);
     for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(1100,302,41,9+i*4,-.25+i*.23,0,Math.PI*2);ctx.strokeStyle=tint(77,.35);ctx.lineWidth=1;ctx.stroke();}
   }
-  const BUILDINGS=[school,university,computing,portal,observatory,thought];
+  function orbitalMind(){
+    const active=shown.counts[10]>0,pulse=reduced?0:Math.sin(time*1.15);
+    glow(238,104,114,'#54d5ed',active?.24+pulse*.025:.07);
+    // Suspended observatory: its original blue brain becomes the living central actor.
+    ellipse(238,159,64,12,'#173c51','#88b9bd',1.5);ellipse(238,155,52,8,'#456c78','#b0d1c7');
+    poly([[196,161],[211,174],[265,174],[280,161]],'#244a61','#578497');
+    for(const x of [177,299]){poly([[x-4,144],[x,73],[x+4,144]],'#41667b','#86b5c1',1);glow(x,74,15,'#75ecf8',active?.22:.04);ellipse(x,74,2,2,'#b2f3ef');}
+    for(let i=0;i<3;i++){
+      const tilt=-.28+i*.3;ctx.beginPath();ctx.ellipse(238,105,91-i*8,25+i*11,tilt,0,Math.PI*2);ctx.strokeStyle=i===1?'rgba(142,222,231,.35)':'rgba(96,175,196,.25)';ctx.lineWidth=i===1?1.3:.8;ctx.stroke();
+      if(active){const angle=i*2.1+(reduced?0:time*.22),dx=Math.cos(angle)*(91-i*8),dy=Math.sin(angle)*(25+i*11),x=238+dx*Math.cos(tilt)-dy*Math.sin(tilt),y=105+dx*Math.sin(tilt)+dy*Math.cos(tilt);glow(x,y,10,'#97faff',.24);ellipse(x,y,2,2,'#c7ffff');}
+    }
+    if(!active){ellipse(238,105,50,50,'#102d44','#739ea9',1.5);text('✺',238,118,39,'#84b6bd','Georgia, serif','center');}
+    text('NOŪS',238,171,7,'#a9d1d4','monospace','center');
+  }
+  const BUILDINGS=[school,university,computing,portal,observatory,thought,orbitalMind];
   function buildings(){
     const p=progress();
     LOCATIONS.forEach((location,index)=>{
@@ -209,8 +235,8 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     if(!shown.total)text('Первая идея разбудит этот мир',592,608,10,'#87aaa0','sans-serif','center');
   });}
   function rebuildActors(){
-    const list=[];for(let type=0;type<10;type++)if(shown.counts[type])list.push({type,order:0});
-    for(let order=1;order<8&&list.length<ACTOR_LIMIT;order++)for(let type=0;type<10&&list.length<ACTOR_LIMIT;type++)if(shown.counts[type]>order&&order<(type===0?8:type>=6?3:6))list.push({type,order});
+    const list=[];for(let type=0;type<shown.counts.length;type++)if(shown.counts[type])list.push({type,order:0});
+    for(let order=1;order<8&&list.length<ACTOR_LIMIT;order++)for(let type=0;type<shown.counts.length&&list.length<ACTOR_LIMIT;type++)if(shown.counts[type]>order&&order<(type===0?8:type>=6?3:6))list.push({type,order});
     actors=list.map(a=>({...a,key:a.type*17+a.order,phase:seed(a.type*17+a.order+53)*Math.PI*2,nextWork:time+.4+seed(a.type*17+a.order+9)*7}));
   }
   function actorPosition(actor){
@@ -219,6 +245,10 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     if(actor.type===0){x=585+Math.cos((moving?time*.33:0)+phase)*(74+n*4);y=550+Math.sin((moving?time*.33:0)+phase)*24;}
     else if([1,2,3,5].includes(actor.type)){x+=moving?Math.sin(time*(n?.24:.45)+phase)*(n?12:2):0;y+=moving?Math.sin(time*(n?.4:1.4)+phase)*(n?4:.8):0;}
     else if(actor.type===7)y+=moving?Math.sin(time*.5)*4:0;
+    else if(actor.type===10){
+      if(n){const orbit=(moving?time*.19:0)+phase;x=h.x+Math.cos(orbit)*82;size=31;y=105+Math.sin(orbit)*35+size/2;}
+      else y+=moving?Math.sin(time*.8)*3:0;
+    }
     return {x,y,size};
   }
   function drawActors(){
@@ -227,13 +257,14 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     for(const a of list){
       const {x,y,size,type,order,key}=a;
       object(x,y,key+80,()=>{
-        ellipse(x,y+2,size*.32,4,'rgba(4,25,27,.27)');
+        if(type===10)glow(x,y-size/2,size*.76,'#6fe3fb',order?.18:.26);else ellipse(x,y+2,size*.32,4,'rgba(4,25,27,.27)');
         if(type===7){ctx.save();ctx.translate(x,y-size*.5);ctx.rotate(reduced?0:time*.2+order);imageAt(type,0,size*.5,size,order?.65:1);ctx.restore();}
         else imageAt(type,x,y,size,order?.83:1);
+        if(type===10){ellipse(x,y-size/2,size*.5,size*.5,null,'#91e8e9',order?1:1.6);if(!order){const angle=reduced?-.4:time*.23;ctx.beginPath();ctx.ellipse(x,y-size/2,size*.58,size*.58,0,angle,angle+Math.PI*.72);ctx.strokeStyle='rgba(181,252,255,.65)';ctx.lineWidth=2;ctx.stroke();}}
         if(type===8&&order===0){const angle=reduced?0:time*.5;line([[x,y-size*.53],[x+Math.sin(angle)*9,y-size*.53-Math.cos(angle)*9]],'#f1e0af',1.5);}
         if(order===0&&[1,2,3,5].includes(type)&&!reduced&&!cinema){const phase=(time+a.phase)%14;if(phase>1&&phase<4){ctx.save();ctx.globalAlpha=Math.min(1,(phase-1)*2,4-phase);rr(x-20,y-size-24,61,20,5,'#dbe3ca');poly([[x,y-size-4],[x+8,y-size-4],[x+2,y-size+2]],'#dbe3ca');text(type===1?'2 + 2 = 4':type===3?'Проверь знак!':'∫ x² dx',x+10,y-size-10,9,'#3d6265','Georgia, serif','center');ctx.restore();}}
       });
-      const image=images[type],ratio=image.naturalWidth/image.naturalHeight||1;hitAreas.push({actor:a,x,y,size,w:Math.min(size*ratio,size*1.62)});
+      const image=images[type],ratio=type===10?1:image.naturalWidth/image.naturalHeight||1;hitAreas.push({actor:a,x,y,size,w:Math.min(size*ratio,size*1.62)});
     }
   }
   function spawnParticle(x,y,key,manual=false){
@@ -266,8 +297,8 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function draw(){
     if(destroyed)return;
     if(cinema&&progress()>=.84&&!cinema.revealed){cinema.revealed=true;shown=latest;rebuildActors();particles=[];waves=[];}
-    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#071b2b';ctx.fillRect(0,0,width,height);ctx.translate(ox,oy);ctx.scale(scale,scale);
-    ctx.save();ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();sky();landLayer(600,535,.37,.805,terrain);nature();buildings();reactor();drawActors();drawParticles();spaceDust();blackHole();
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.translate(ox,oy);ctx.scale(scale,scale);
+    ctx.save();ctx.beginPath();ctx.rect(view.left,view.top,view.right-view.left,view.bottom-view.top);ctx.clip();sky();landLayer(600,535,.37,.805,terrain);nature();buildings();reactor();drawActors();drawParticles();spaceDust();blackHole();
     if(cinema){const p=progress();text(p<.22?'Пространство начинает изгибаться…':p<.76?'Идеи возвращаются к истоку':p<.88?'За пределами бесконечности':'Новая вселенная. Новое начало.',600,724,17,'#d8e9e2','Georgia, serif','center');}
     else{text('АТЛАС БЕСКОНЕЧНОСТИ',38,716,12,'#a6c1b3','sans-serif');text('Нажмите на здание или помощника',38,737,10,'#739c91','sans-serif');text(shown.prestige?`ВСЕЛЕННАЯ · ${Math.floor(shown.prestige)}`:'ПЕРВАЯ ВСЕЛЕННАЯ',1160,731,10,'#8caeaa','sans-serif','right');}
     ctx.restore();ctx.setTransform(1,0,0,1,0,0);
@@ -280,7 +311,9 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     if(destroyed)return;const next=snapshot(state,options),changed=next.counts.some((v,i)=>v!==latest.counts[i])||next.hue!==latest.hue||next.prestige!==latest.prestige||next.accent!==latest.accent;latest=next;
     if(!cinema&&changed)applyLatest();
   }
-  function resize(){if(destroyed)return;const r=canvas.getBoundingClientRect();width=Math.max(1,r.width||W);height=Math.max(1,r.height||H);dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);scale=Math.min(width/W,height/H);ox=(width-W*scale)/2;oy=(height-H*scale)/2;draw();schedule();}
+  function resize(){if(destroyed)return;const r=canvas.getBoundingClientRect();width=Math.max(1,r.width||W);height=Math.max(1,r.height||H);dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);scale=Math.min(width/W,height/H);ox=(width-W*scale)/2;oy=(height-H*scale)/2;
+    // Keep every landmark visible; extend the landscape instead of adding letterbox bars.
+    view={left:-ox/scale,top:-oy/scale,right:(width-ox)/scale,bottom:(height-oy)/scale};draw();schedule();}
   function burst(x,y){
     if(destroyed||manualPaused||document.hidden||!inView||cinema)return;
     const p=Number.isFinite(x)&&Number.isFinite(y)?{x:(x-ox)/scale,y:(y-oy)/scale}:HUB;

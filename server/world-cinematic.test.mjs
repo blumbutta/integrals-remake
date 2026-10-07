@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLabWorld} from '../world.mjs';
+import {GENERATORS} from '../shared/economy.mjs';
+import {researchArtwork} from '../research-art.mjs';
 
 function browser(t){
   const names=['window','document','performance','Image','ResizeObserver','IntersectionObserver','requestAnimationFrame','cancelAnimationFrame'];
@@ -9,39 +11,40 @@ function browser(t){
   const document=new EventTarget();document.hidden=false;
   const window=new EventTarget();window.devicePixelRatio=1;window.matchMedia=()=>media;
   const frames=new Map(),worlds=[];let clock=0,id=0,state,stack=[];
-  const paint=[],labels=[];let portraitCount=0;
+  const paint=[],labels=[],portraits=[];let portraitCount=0,canvas;
   const defaults=()=>({matrix:[1,0,0,1,0,0],globalAlpha:1,fillStyle:'#000',strokeStyle:'#000'});
   state=defaults();
-  const record=(kind,color)=>paint.push({kind,color,matrix:[...state.matrix],alpha:state.globalAlpha});
+  const record=(kind,color,bounds)=>paint.push({kind,color,bounds,matrix:[...state.matrix],alpha:state.globalAlpha});
   const methods={
     save(){stack.push({...state,matrix:[...state.matrix]});},restore(){state=stack.pop()||defaults();},
     setTransform(...matrix){state.matrix=matrix;},
     translate(x,y){const [a,b,c,d,e,f]=state.matrix;state.matrix=[a,b,c,d,a*x+c*y+e,b*x+d*y+f];},
     scale(x,y){const [a,b,c,d,e,f]=state.matrix;state.matrix=[a*x,b*x,c*y,d*y,e,f];},
     rotate(r){const [a,b,c,d,e,f]=state.matrix,co=Math.cos(r),si=Math.sin(r);state.matrix=[a*co+c*si,b*co+d*si,c*co-a*si,d*co-b*si,e,f];},
-    fill(){record('fill',state.fillStyle);},stroke(){record('stroke',state.strokeStyle);},fillRect(){record('rect',state.fillStyle);},
-    fillText(value){labels.push(value);},drawImage(){portraitCount++;},
+    fill(){record('fill',state.fillStyle);},stroke(){record('stroke',state.strokeStyle);},fillRect(...bounds){record('rect',state.fillStyle,bounds);},
+    fillText(value){labels.push(value);},drawImage(image,...args){portraitCount++;portraits.push({source:image.src,args,matrix:[...state.matrix]});},
     createLinearGradient(){return {addColorStop(){}};},createRadialGradient(){return {addColorStop(){}};},
   };
   const ctx=new Proxy({}, {get(_target,key){return methods[key]??state[key]??(()=>{});},set(_target,key,value){state[key]=value;return true;}});
   const values={window,document,performance:{now:()=>clock},
-    Image:class{naturalWidth=64;naturalHeight=64;complete=true;set src(_value){}},
+    Image:class{naturalWidth=64;naturalHeight=64;complete=true;set src(value){this.source=value;if(value.endsWith('superintelligence.png')){this.naturalWidth=403;this.naturalHeight=740;}}get src(){return this.source;}},
     ResizeObserver:class{observe(){}disconnect(){}},IntersectionObserver:class{observe(){}disconnect(){}},
     requestAnimationFrame(fn){frames.set(++id,fn);return id;},cancelAnimationFrame(key){frames.delete(key);},
   };
   for(const name of names)Object.defineProperty(globalThis,name,{value:values[name],configurable:true,writable:true});
   t.after(()=>{for(const world of worlds)world.destroy();for(const name of names){const descriptor=original.get(name);if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}});
   return {
-    frames,paint,labels,document,
-    world(){const canvas=new EventTarget();canvas.getContext=()=>ctx;canvas.getBoundingClientRect=()=>({width:1200,height:760,left:0,top:0});const world=createLabWorld(canvas);worlds.push(world);return world;},
-    clear(){paint.length=0;labels.length=0;portraitCount=0;},
+    frames,paint,labels,portraits,document,
+    world(options={},size={width:1200,height:760}){canvas=new EventTarget();canvas.getContext=()=>ctx;canvas.getBoundingClientRect=()=>({...size,left:0,top:0});const world=createLabWorld(canvas,options);worlds.push(world);return world;},
+    clear(){paint.length=0;labels.length=0;portraitCount=0;portraits.length=0;},
+    click(x,y){clock+=200;const event=new Event('click');Object.defineProperties(event,{clientX:{value:x},clientY:{value:y}});canvas.dispatchEvent(event);},
     frameAt(value){clock=value;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(clock);},
     get portraitCount(){return portraitCount;},
     reduce(){media.matches=true;const event=new Event('change');Object.defineProperty(event,'matches',{value:true});media.dispatchEvent(event);},
   };
 }
-const oldWorld=()=>({generators:Array(10).fill(8),prestige:1});
-const newWorld=()=>({generators:Array(10).fill(0),prestige:9});
+const oldWorld=()=>({generators:GENERATORS.map(()=>8),prestige:1});
+const newWorld=()=>({generators:GENERATORS.map(()=>0),prestige:9});
 const landColors=['#244944','#819281','#35636a']; // Ground, paved road and river.
 
 test('prestige pulls the terrain, roads and river away, then reveals the buffered new world',async t=>{
@@ -75,4 +78,43 @@ test('skip, hidden page, reduced motion and destroy always settle the animation 
   const reduced=mock.world();reduced.update(oldWorld());mock.reduce();
   animation=reduced.playPrestige({state:oldWorld(),durationMs:6500});reduced.update(newWorld());assert.equal(mock.frames.size,0);
   await animation;assert.equal(mock.frames.size,0);reduced.destroy();
+});
+
+test('the new orbital mind uses the supplied brain, stays inspectable, and joins prestige without changing legacy saves',async t=>{
+  const mock=browser(t),locations=[],inspections=[];
+  const world=mock.world({onLocation:value=>locations.push(value),onInspect:value=>inspections.push(value)});
+  const legacy={generators:Array(10).fill(0),prestige:2},unchanged=structuredClone(legacy);
+  world.update(legacy);assert.deepEqual(legacy,unchanged);assert.equal(mock.portraitCount,0);
+  assert.ok(mock.labels.includes('Орбитальный сверхразум'));assert.ok(mock.labels.every(label=>!String(label).includes('NaN')));
+  mock.click(238,191);assert.deepEqual(locations,[{id:'orbitalmind',name:'Орбитальный сверхразум',generatorIndices:[10]}]);
+  const state=newWorld();state.generators[10]=3;mock.clear();world.update(state);
+  const brains=mock.portraits.filter(p=>p.source.endsWith('/assets/custom/superintelligence.png'));
+  assert.equal(brains.length,3,'main core and two working satellites use the supplied artwork');
+  assert.ok(brains.every(p=>p.args.length===8&&p.args[1]+p.args[3]<740),'the canvas crops the image above its city');
+  mock.click(238,105);assert.equal(inspections[0].generatorIndex,10);assert.equal(inspections[0].name,'Сверхразум ИИ');assert.equal(inspections[0].count,3);assert.ok(inspections[0].task.length>0);
+  const animation=world.playPrestige({state,durationMs:6500});world.update(newWorld());
+  mock.clear();mock.frameAt(400+6500*.62);assert.ok(mock.portraits.some(p=>p.source.endsWith('superintelligence.png')),'the old mind survives until its absorption phase');
+  mock.clear();mock.frameAt(400+6500*.812);assert.equal(mock.portraitCount,0,'the new mind is absorbed along with the rest of the world');
+  mock.clear();world.finishPrestige();await animation;assert.equal(mock.portraitCount,0);assert.equal(mock.frames.size,0);
+  mock.clear();world.update({generators:GENERATORS.map(()=>100),prestige:9});assert.ok(mock.portraitCount<=45,'the added stage preserves the scene actor limit');
+});
+
+test('superintelligence research has two distinct illustrations instead of recycling the first upgrade',()=>{
+  const svg=index=>researchArtwork(index).match(/<svg.*?<\/svg>/)[0];
+  assert.notEqual(svg(24),svg(0));assert.notEqual(svg(25),svg(1));assert.notEqual(svg(24),svg(25));
+  assert.ok(researchArtwork(25,true).includes('✓'));
+});
+
+test('the landscape fills wide and tall canvases while all landmark click targets remain aligned',t=>{
+  const mock=browser(t),locations=[],size={width:1280,height:560};
+  const world=mock.world({onLocation:location=>locations.push(location.id)},size);
+  const targets=[['school',207,538],['university',447,400],['computing',890,579],['portals',979,262],['observatory',697,331],['thought',1100,485],['orbitalmind',238,191]];
+  for(const dimensions of [{width:1280,height:560},{width:390,height:600}]){
+    Object.assign(size,dimensions);mock.clear();world.resize();
+    const background=mock.paint.find(p=>p.kind==='rect'),[sx,, ,sy,ox,oy]=background.matrix,[x,y,w,h]=background.bounds;
+    const near=(a,b)=>assert.ok(Math.abs(a-b)<.001,`${a} should equal ${b}`);
+    near(ox+x*sx,0);near(oy+y*sy,0);near(w*sx,size.width);near(h*sy,size.height);
+    assert.notEqual(background.color,'#071b2b','the sky and terrain replace letterbox bars');
+    for(const [id,x,y]of targets){const cx=ox+x*sx,cy=oy+y*sy;assert.ok(cx>=0&&cx<=size.width&&cy>=0&&cy<=size.height);mock.click(cx,cy);assert.equal(locations.at(-1),id);}
+  }
 });

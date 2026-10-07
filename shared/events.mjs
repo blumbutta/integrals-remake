@@ -1,21 +1,21 @@
 export const WORLD_EVENTS=Object.freeze([
-  {id:'school-olympiad',source:'world',generatorId:'abacus',name:'Школьная олимпиада',description:'Команда школьников готова к задачам со звёздочкой.',rules:'Три задачи: скобки, дробь и неизвестное. Выбери правильный ответ в каждой.',kind:'quiz',durationSec:90,rewardClicks:90,penaltyClicks:25,cooldownSec:300},
-  {id:'portal-meteors',source:'world',generatorId:'dimension',name:'Метеорный поток',description:'Портал принёс шесть отметок космической обсерватории.',rules:'Расположи время появления шести метеоров по возрастанию, от самого раннего к позднему.',kind:'sort',durationSec:60,rewardClicks:600,penaltyClicks:90,cooldownSec:300},
-  {id:'academic-discovery',source:'world',generatorId:'quantum',name:'Академическое открытие',description:'Профессор проверяет новую гипотезу об интегралах.',rules:'Три вопроса о площади, первообразной и постоянной интегрирования. Подтверди все три вывода.',kind:'quiz',durationSec:75,rewardClicks:320,penaltyClicks:60,cooldownSec:300},
+  {id:'school-olympiad',source:'world',generatorId:'abacus',name:'Школьная олимпиада',description:'Команда школьников готова к задачам со звёздочкой.',rules:'Три задачи: скобки, дробь и неизвестное. Выбери правильный ответ в каждой.',kind:'quiz',durationSec:90,rewardClicks:90,cooldownSec:300},
+  {id:'portal-meteors',source:'world',generatorId:'dimension',name:'Метеорный поток',description:'Портал принёс шесть отметок космической обсерватории.',rules:'Расположи время появления шести метеоров по возрастанию, от самого раннего к позднему.',kind:'sort',durationSec:60,rewardClicks:600,cooldownSec:300},
+  {id:'academic-discovery',source:'world',generatorId:'quantum',name:'Академическое открытие',description:'Профессор проверяет новую гипотезу об интегралах.',rules:'Три вопроса о площади, первообразной и постоянной интегрирования. Подтверди все три вывода.',kind:'quiz',durationSec:75,rewardClicks:320,cooldownSec:300},
 ]);
 export const EVENTS = Object.freeze([
-  {id:'school',generatorId:'abacus',name:'Контрольная',description:'Помоги школьнику решить три примера.',rules:'Три вопроса. Выбери правильный ответ в каждом.',kind:'quiz',durationSec:60,rewardClicks:40,penaltyClicks:10,cooldownSec:300},
-  {id:'student',generatorId:'calculator',name:'Сессия',description:'Три производные до звонка.',rules:'Выбери производную каждой функции.',kind:'quiz',durationSec:45,rewardClicks:60,penaltyClicks:15,cooldownSec:300},
-  {id:'teacher',generatorId:'algorithm',name:'Проверка работ',description:'Найди ошибки в чужих решениях.',rules:'В каждом вопросе укажи неверное равенство.',kind:'quiz',durationSec:35,rewardClicks:90,penaltyClicks:20,cooldownSec:300},
-  {id:'computer',generatorId:'neuron',name:'Двоичный код',description:'Переведи сообщения компьютера.',rules:'Переведи три двоичных числа в десятичные.',kind:'quiz',durationSec:90,rewardClicks:120,penaltyClicks:25,cooldownSec:300},
-  {id:'professor',generatorId:'quantum',name:'Научный семинар',description:'Подбери первообразные многочленов.',rules:'Выбери неопределённый интеграл каждого выражения.',kind:'quiz',durationSec:45,rewardClicks:180,penaltyClicks:40,cooldownSec:300},
-  {id:'ai',generatorId:'singularity',name:'Обучение модели',description:'Найди закономерности в последовательностях.',rules:'Выбери следующее число в каждом ряду.',kind:'quiz',durationSec:30,rewardClicks:240,penaltyClicks:50,cooldownSec:300},
-  {id:'portal',generatorId:'dimension',name:'Обратный сигнал',description:'Сохрани код, проходящий через портал.',rules:'Запомни четыре цифры за 5 секунд. Введи их в обратном порядке.',kind:'reverse',durationSec:30,rewardClicks:360,penaltyClicks:75,cooldownSec:300},
-  {id:'time',generatorId:'universe',name:'Хронология',description:'Верни числа на правильную временную линию.',rules:'Расположи шесть чисел по возрастанию.',kind:'sort',durationSec:45,rewardClicks:480,penaltyClicks:100,cooldownSec:300},
-  {id:'thought',generatorId:'multiverse',name:'Главный вопрос',description:'Проверь логику Глубокой мысли.',rules:'Три логические задачи. Нужны три верных ответа.',kind:'quiz',durationSec:35,rewardClicks:720,penaltyClicks:150,cooldownSec:300},
+  {id:'school',generatorId:'abacus',name:'Контрольная',description:'Помоги школьнику решить три примера.',rules:'Три вопроса. Выбери правильный ответ в каждом.',kind:'quiz',durationSec:60,rewardClicks:40,cooldownSec:300},
+  {id:'student',generatorId:'calculator',name:'Сессия',description:'Три производные до звонка.',rules:'Выбери производную каждой функции.',kind:'quiz',durationSec:45,rewardClicks:60,cooldownSec:300},
+  {id:'teacher',generatorId:'algorithm',name:'Проверка работ',description:'Найди ошибки в чужих решениях.',rules:'В каждом вопросе укажи неверное равенство.',kind:'quiz',durationSec:35,rewardClicks:90,cooldownSec:300},
+  {id:'computer',generatorId:'neuron',name:'Двоичный код',description:'Переведи сообщения компьютера.',rules:'Переведи три двоичных числа в десятичные.',kind:'quiz',durationSec:90,rewardClicks:120,cooldownSec:300},
+  {id:'professor',generatorId:'quantum',name:'Научный семинар',description:'Подбери первообразные многочленов.',rules:'Выбери неопределённый интеграл каждого выражения.',kind:'quiz',durationSec:45,rewardClicks:180,cooldownSec:300},
+  {id:'ai',generatorId:'singularity',name:'Обучение модели',description:'Найди закономерности в последовательностях.',rules:'Выбери следующее число в каждом ряду.',kind:'quiz',durationSec:30,rewardClicks:240,cooldownSec:300},
+  {id:'portal',generatorId:'dimension',name:'Обратный сигнал',description:'Сохрани код, проходящий через портал.',rules:'Запомни четыре цифры за 5 секунд. Введи их в обратном порядке.',kind:'reverse',durationSec:30,rewardClicks:360,cooldownSec:300},
+  {id:'time',generatorId:'universe',name:'Хронология',description:'Верни числа на правильную временную линию.',rules:'Расположи шесть чисел по возрастанию.',kind:'sort',durationSec:45,rewardClicks:480,cooldownSec:300},
+  {id:'thought',generatorId:'multiverse',name:'Главный вопрос',description:'Проверь логику Глубокой мысли.',rules:'Три логические задачи. Нужны три верных ответа.',kind:'quiz',durationSec:35,rewardClicks:720,cooldownSec:300},
   ...WORLD_EVENTS,
 ]);
-const GENERATOR_IDS=['autoclick','abacus','calculator','algorithm','neuron','quantum','singularity','dimension','universe','multiverse'];
+const GENERATOR_IDS=['autoclick','abacus','calculator','algorithm','neuron','quantum','singularity','dimension','universe','multiverse','superintelligence'];
 const randomInt=(lo,hi)=>lo+Math.floor(Math.random()*(hi-lo+1));
 export class EventError extends Error {constructor(code,message){super(message);this.name='EventError';this.code=code;}}
 function eventError(code,message){throw new EventError(code,message);}
@@ -77,6 +77,10 @@ export function getPublicEvent(event){
   if(!event)return null;
   return {id:event.id,eventId:event.eventId,kind:event.kind,name:event.name,deadline:event.deadline,startedAt:event.startedAt,reward:event.reward,penalty:event.penalty,prompts:event.prompts.map(p=>({...p,...(p.options?{options:[...p.options]}:{})})),data:{...event.data,...(event.data.numbers?{numbers:[...event.data.numbers]}:{})}};
 }
+export function eventStakes(stats,definition){
+  const reward=Math.max(definition.rewardClicks*stats.clickPower,stats.cps*30);
+  return {reward,penalty:reward};
+}
 export function startEvent(state,eventId,stats,now=Date.now()){
   const definition=EVENTS.find(e=>e.id===eventId);
   if(!definition)eventError('unknown_event','Такого испытания нет.');
@@ -92,7 +96,7 @@ export function startEvent(state,eventId,stats,now=Date.now()){
     const meteors=eventId==='portal-meteors';
     const numbers=new Set();while(numbers.size<6)numbers.add(randomInt(1,meteors?360:99));data={numbers:shuffle([...numbers])};prompts=[{prompt:meteors?'Расставь отметки появления метеоров по времени, от ранней к поздней (секунды).':'Расположи числа по возрастанию.'}];answers=[...numbers].sort((a,b)=>a-b);
   }
-  const event={id:globalThis.crypto.randomUUID(),eventId,kind:definition.kind,name:definition.name,startedAt:now,deadline:now+definition.durationSec*1000,reward:Math.max(definition.rewardClicks*stats.clickPower,stats.cps*30),penalty:definition.penaltyClicks*stats.clickPower,prompts,data,_answers:answers};
+  const event={id:globalThis.crypto.randomUUID(),eventId,kind:definition.kind,name:definition.name,startedAt:now,deadline:now+definition.durationSec*1000,...eventStakes(stats,definition),prompts,data,_answers:answers};
   state.activeEvent=event;state.eventCooldowns||={};state.eventCooldowns[eventId]=now+definition.cooldownSec*1000;state.eventStats||={wins:0,losses:0};return event;
 }
 function resolve(state,outcome,now){

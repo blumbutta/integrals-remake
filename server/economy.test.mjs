@@ -1,13 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GENERATORS, UPGRADES, createState, applyAction, settle, getStats, priceFor, MAX_OFFLINE_MS, PRESTIGE_PRICE } from '../shared/economy.mjs';
+import { GENERATORS, UPGRADES, createState, applyAction, settle, getStats, priceFor, MAX_OFFLINE_MS, PRESTIGE_PRICE, migrateState } from '../shared/economy.mjs';
 
 test('first generator has reachable price and production; bulk prices compound',()=>{
   const s=createState(0);applyAction(s,{type:'click',amount:15},0);assert.equal(s.balance,15);
   applyAction(s,{type:'buy',itemId:'autoclick'},0);assert.equal(s.balance,0);assert.equal(getStats(s).cps,0.25);
   settle(s,10000);assert.equal(s.balance,2.5);
   assert.equal(priceFor('autoclick',0),15);assert.equal(priceFor('autoclick',1),18);
-  assert.ok(priceFor('autoclick',0,10)>150);assert.equal(GENERATORS.length,10);assert.ok(UPGRADES.length>=12);
+  assert.ok(priceFor('autoclick',0,10)>150);assert.equal(GENERATORS.length,11);assert.equal(UPGRADES.length,26);
+});
+test('legacy ten-stage saves append zero slots without losing balances, records or active challenge stakes',()=>{
+  const state=createState(0);state.generators=[4,1,2,3,0,0,0,0,0,0];
+  state.achievementRecords={generators:[8,2,4,6,0,0,0,0,0,0],maxGenerators:20,maxUpgrades:3,maxCps:999};
+  state.balance=1234;state.totalEarned=5678;state.runEarned=1234;state.upgrades=['click-1'];state.achievements=['all','upgrades-24'];
+  applyAction(state,{type:'event_start',itemId:'school'},0);
+  // Simulate the older release on disk, including its historical smaller penalty.
+  state.generators.length=10;state.achievementRecords.generators.length=10;state.activeEvent.penalty=10;
+  const snapshot=structuredClone(state),rate=getStats(state).cps;
+  assert.ok(Number.isFinite(rate));assert.equal(migrateState(state),state);
+  assert.deepEqual(state.generators,[...snapshot.generators,0]);
+  assert.deepEqual(state.achievementRecords,{...snapshot.achievementRecords,generators:[...snapshot.achievementRecords.generators,0]});
+  for(const key of ['balance','totalEarned','runEarned','upgrades','achievements','activeEvent','eventCooldowns'])assert.deepEqual(state[key],snapshot[key]);
+  migrateState(state);settle(state,0);assert.equal(state.generators.length,11);assert.equal(getStats(state).cps,rate);assert.equal(state.activeEvent.penalty,10);
+});
+test('superintelligence can be purchased from an old save and both researches multiply its production',()=>{
+  const state=createState(0);state.generators=Array(10).fill(0);state.balance=1e20;
+  const generator=GENERATORS.at(-1);assert.equal(generator.id,'superintelligence');
+  assert.equal(generator.basePrice,10_000_000_000_000);assert.equal(generator.baseCps,240_000_000);
+  assert.throws(()=>applyAction(state,{type:'upgrade',itemId:'superintelligence-1'},0),{code:'upgrade_locked'});
+  applyAction(state,{type:'buy',itemId:'superintelligence',amount:10},0);assert.equal(state.generators[10],10);assert.equal(getStats(state).cps,2_400_000_000);
+  applyAction(state,{type:'upgrade',itemId:'superintelligence-1'},0);assert.equal(getStats(state).cps,4_800_000_000);
+  assert.throws(()=>applyAction(state,{type:'upgrade',itemId:'superintelligence-2'},0),{code:'upgrade_locked'});
+  applyAction(state,{type:'buy',itemId:'superintelligence',amount:15},0);applyAction(state,{type:'upgrade',itemId:'superintelligence-2'},0);
+  assert.equal(getStats(state).cps,24_000_000_000);assert.ok(state.achievements.includes('stage-superintelligence-25'));
+  assert.ok(UPGRADES.every(u=>u.name&&u.description));
 });
 test('offline production pays half after grace and stops after 12 hours, even across repeated settlement',()=>{
   const s=createState(0);s.generators[0]=4;

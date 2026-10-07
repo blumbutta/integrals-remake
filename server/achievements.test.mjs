@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ACHIEVEMENTS,COSMETICS,collectAchievements,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors } from '../shared/achievements.mjs';
-import { createState,applyAction,settle,getStats,PRESTIGE_PRICE } from '../shared/economy.mjs';
+import { createState,applyAction,settle,getStats,PRESTIGE_PRICE,UPGRADES } from '../shared/economy.mjs';
 
-test('achievement catalog has 86 unique, meaningful milestones and keeps all original IDs',()=>{
-  assert.equal(ACHIEVEMENTS.length,86);assert.equal(new Set(ACHIEVEMENTS.map(a=>a.id)).size,86);
+test('achievement catalog has 91 unique, meaningful milestones and keeps all original IDs',()=>{
+  assert.equal(ACHIEVEMENTS.length,91);assert.equal(new Set(ACHIEVEMENTS.map(a=>a.id)).size,91);
   for(const id of ['first','click100','auto','hundred','team','research','speed','million','click1000','prestige','billion','all'])assert.ok(ACHIEVEMENTS.some(a=>a.id===id),id);
   const state=createState(0);
   for(const a of ACHIEVEMENTS){assert.ok(a.name&&a.text&&a.icon);assert.ok(a.target>0);assert.equal(a.value(state,getStats(state)),0);}
@@ -26,8 +26,8 @@ test('all stage milestones, peak rates, and upgrades survive a prestige reset',(
   const peak=getStats(state).cps;collectAchievements(state,getStats(state));
   assert.ok(state.achievements.includes('stage-multiverse-100'));assert.ok(state.achievements.includes('research'));assert.equal(cosmeticUnlocked(state,'jade'),true);
   applyAction(state,{type:'prestige'},0);
-  assert.deepEqual(state.generators,Array(10).fill(0));assert.equal(state.upgrades.length,0);
-  assert.equal(state.achievementRecords.maxCps,peak);assert.deepEqual(state.achievementRecords.generators,Array(10).fill(100));
+  assert.deepEqual(state.generators,Array(11).fill(0));assert.equal(state.upgrades.length,0);
+  assert.equal(state.achievementRecords.maxCps,peak);assert.deepEqual(state.achievementRecords.generators,Array(11).fill(100));
   assert.equal(ACHIEVEMENTS.find(a=>a.id==='stage-multiverse-100').value(state,getStats(state)),100);
   assert.ok(state.achievements.includes('all'));assert.ok(state.achievements.includes('prestige:1'));
   assert.equal(cosmeticUnlocked(state,'blueprint'),true);assert.equal(cosmeticUnlocked(state,'violet'),true);
@@ -37,11 +37,28 @@ test('legacy saves migrate without dropping existing badges or changing game dat
   const state=createState(0);delete state.achievementRecords;state.achievements=['first','team','speed','all'];state.totalEarned=5;state.balance=3;state.prestigeCount=2;
   collectAchievements(state,getStats(state));
   for(const id of ['first','team','speed','all'])assert.ok(state.achievements.includes(id));
-  assert.equal(state.balance,3);assert.equal(state.totalEarned,5);assert.equal(state.achievementRecords.generators.length,10);
+  assert.equal(state.balance,3);assert.equal(state.totalEarned,5);assert.equal(state.achievementRecords.generators.length,11);
   // Unknown historical prestige counts are represented lazily, never expanded into stored arrays.
   assert.equal(state.achievements.some(id=>id.startsWith('prestige:')),false);
   const empty=createState(0);delete empty.achievements;delete empty.achievementRecords;settle(empty,0);
   assert.deepEqual(empty.achievements,[]);assert.equal(empty.achievementRecords.maxCps,0);
+});
+test('all-production achievement now includes superintelligence while historical awards remain earned',()=>{
+  const state=createState(0);state.generators=Array(10).fill(1);state.achievementRecords.generators=Array(10).fill(0);
+  settle(state,0);assert.equal(state.generators[10],0);assert.ok(!state.achievements.includes('all'));
+  state.generators[10]=1;settle(state,0);assert.ok(state.achievements.includes('all'));assert.ok(state.achievements.includes('stage-superintelligence-1'));
+  state.generators[10]=0;settle(state,0);assert.ok(state.achievements.includes('all'));
+  const legacy=createState(0);legacy.generators=Array(10).fill(1);legacy.achievements=['all','upgrades-24'];settle(legacy,0);
+  assert.ok(legacy.achievements.includes('all'));assert.ok(legacy.achievements.includes('upgrades-24'));
+  assert.equal(ACHIEVEMENTS.find(a=>a.id==='all').target,11);
+});
+test('new stage has all four milestones and completing 26 research items has a separate retained badge',()=>{
+  const state=createState(0);state.generators[10]=100;
+  state.upgrades=UPGRADES.map(u=>u.id);collectAchievements(state,getStats(state));
+  for(const n of [1,10,25,100])assert.ok(state.achievements.includes(`stage-superintelligence-${n}`));
+  assert.ok(state.achievements.includes('upgrades-26'));assert.ok(state.achievements.includes('upgrades-24'));
+  state.generators[10]=0;state.upgrades=[];collectAchievements(state,getStats(state));
+  assert.equal(state.achievementRecords.generators[10],100);assert.ok(state.achievements.includes('upgrades-26'));
 });
 
 test('each legitimate prestige awards its own badge, independently of points gained',()=>{

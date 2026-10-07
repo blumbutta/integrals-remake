@@ -1,6 +1,6 @@
 // Cosmetic milestones never change the economy. Peak records survive a prestige reset.
 const safe=value=>Number.isFinite(value)&&value>0?value:0;
-const generators=state=>Array.from({length:10},(_,i)=>safe(state.generators?.[i]));
+const generators=state=>Array.from({length:stages.length},(_,i)=>safe(state.generators?.[i]));
 const totalGenerators=state=>generators(state).reduce((a,b)=>a+b,0);
 const peakGenerators=state=>Math.max(totalGenerators(state),safe(state.achievementRecords?.maxGenerators));
 const peakUpgrades=state=>Math.max(state.upgrades?.length||0,safe(state.achievementRecords?.maxUpgrades));
@@ -14,10 +14,11 @@ const stages=[
   ['neuron','Компьютер','λ','компьютеров'],['quantum','Профессор','⟨⟩','профессоров'],
   ['singularity','Искусственный интеллект','ψ','систем ИИ'],['dimension','Портал','⊙','порталов'],
   ['universe','Машина времени','◇','машин времени'],['multiverse','Глубокая мысль','∞','Глубоких мыслей'],
+  ['superintelligence','Сверхразум ИИ','✺','Сверхразумов ИИ'],
 ];
 
 export const ACHIEVEMENTS=Object.freeze([
-  // These twelve IDs and goals match the original release and remain valid in old saves.
+  // These twelve IDs remain valid in old saves; awarded badges are never revoked.
   item('first','∫','Первый принцип','Собрать первый интеграл',1,earned),
   item('click100','↖','Разминка для ума','Сделать 100 кликов',100,clicks),
   item('auto','⌘','Сила автоматизации','Приобрести первый генератор',1,peakGenerators),
@@ -29,7 +30,7 @@ export const ACHIEVEMENTS=Object.freeze([
   item('click1000','✦','Всё в ваших руках','Сделать 1 000 кликов',1000,clicks),
   item('prestige','∞','За пределами','Выполнить первое перерождение',1,prestiges),
   item('billion','⊙','Масштаб вселенной','Получить 1 миллиард интегралов',1e9,earned),
-  item('all','ψ','Единая теория','Открыть все виды производства',10,state=>stages.reduce((sum,_,i)=>sum+(Math.max(safe(state.generators?.[i]),safe(state.achievementRecords?.generators?.[i]))>0?1:0),0)),
+  item('all','ψ','Единая теория','Открыть все виды производства',stages.length,state=>stages.reduce((sum,_,i)=>sum+(Math.max(safe(state.generators?.[i]),safe(state.achievementRecords?.generators?.[i]))>0?1:0),0)),
   ...[
     [10,'Первые штрихи'],[500,'Ритм исследования'],[10_000,'Твёрдая рука'],[100_000,'Мастер повторения'],[1_000_000,'Миллион прикосновений'],
   ].map(([n,name])=>item('click'+n,'↖',name,`Сделать ${countText(n)} кликов`,n,clicks)),
@@ -44,7 +45,7 @@ export const ACHIEVEMENTS=Object.freeze([
     n===1?`Купить помощника «${name}»`:`Иметь ${n} ${plural} одновременно`,n,
     state=>Math.max(safe(state.generators?.[index]),safe(state.achievementRecords?.generators?.[index])),
   ))),
-  ...[[1,'Любопытство'],[10,'Десять открытий'],[24,'Все грани знания']].map(([n,name])=>item('upgrades-'+n,'⌁',name,`Завершить ${n} исследований за один цикл`,n,peakUpgrades)),
+  ...[[1,'Любопытство'],[10,'Десять открытий'],[24,'Все грани знания'],[26,'Разум без границ']].map(([n,name])=>item('upgrades-'+n,'⌁',name,`Завершить ${n} исследований за один цикл`,n,peakUpgrades)),
   ...[[1,'Первое испытание'],[10,'Верные решения'],[50,'Мастер задач'],[100,'Безупречная практика']].map(([n,name])=>item('event-wins-'+n,'✓',name,`Победить в ${n} испытаниях`,n,wins)),
   ...[[2,'Вторая жизнь'],[5,'Пять начал'],[10,'Вечное возвращение'],[25,'За пределами циклов']].map(([n,name])=>item('prestige-runs-'+n,'∞',name,`Выполнить ${n} перерождений`,n,prestiges)),
   ...[[100,'Большая лаборатория'],[500,'Исследовательский город'],[1000,'Цивилизация науки']].map(([n,name])=>item('team-'+n,'π',name,`Иметь ${countText(n)} помощников одновременно`,n,peakGenerators)),

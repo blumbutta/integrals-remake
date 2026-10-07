@@ -23,6 +23,8 @@ const drawings=[
   '<path d="M12 5h24M12 43h24M15 6c0 15 18 21 18 36M33 6c0 15-18 21-18 36M18 35h12M19 12h10"/>',
   '<circle cx="24" cy="24" r="19"/><text x="24" y="31" text-anchor="middle" stroke="none" fill="currentColor" font-family="Georgia" font-size="22">42</text>',
   '<path d="M3 24c7-19 14-19 21 0s14 19 21 0c-7-19-14-19-21 0S10 43 3 24z"/><path d="M24 3v7m0 28v7M3 4l5 5m32 31 5 5"/>',
+  '<path d="M22 11c-5-8-14-4-14 3-7 2-7 12-1 15-2 8 8 12 14 6V12m6-1c5-8 14-4 14 3 7 2 7 12 1 15 2 8-8 12-14 6V12M12 16h5v8h5m-10 5h5v-5m19-8h-5v8h-4m10 5h-6v-5"/><circle cx="12" cy="16" r="1.5"/><circle cx="36" cy="16" r="1.5"/><path d="M11 42c9 6 21 4 28-3m-6-1 7 1-3 6"/>',
+  '<path d="m24 3 17 10v21L24 44 7 34V13zM7 13l17 10 17-10M24 23v21M7 34l17-11 17 11M24 3v9"/><path d="m24 14 8 5v10l-8 5-8-5V19z"/><circle cx="24" cy="23" r="4"/><circle cx="7" cy="13" r="2.5"/><circle cx="41" cy="13" r="2.5"/><circle cx="24" cy="44" r="2.5"/>',
 ];
 export function researchArtwork(index,owned=false){
   const hue=(index*37+28)%360;

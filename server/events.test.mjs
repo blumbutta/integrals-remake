@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EVENTS, WORLD_EVENTS, eventAvailable, getPublicEvent } from '../shared/events.mjs';
+import { EVENTS, WORLD_EVENTS, eventAvailable, eventStakes, getPublicEvent } from '../shared/events.mjs';
 import { createState, applyAction, settle, GENERATORS } from '../shared/economy.mjs';
 
 test('all twelve event types unlock from their own generator and validate their own generated answers',()=>{
@@ -13,7 +13,7 @@ test('all twelve event types unlock from their own generator and validate their 
     assert.equal(eventAvailable(s,event.id,0),true);
     applyAction(s,{type:'event_start',itemId:event.id},0);
     const active=s.activeEvent,publicEvent=getPublicEvent(active);
-    assert.equal(active.deadline,event.durationSec*1000);assert.ok(active.reward>0);assert.ok(active.penalty>0);
+    assert.equal(active.deadline,event.durationSec*1000);assert.ok(active.reward>0);assert.equal(active.penalty,active.reward);
     assert.equal(publicEvent._answers,undefined);assert.ok(!JSON.stringify(publicEvent).includes('_answers'));
     const reward=active.reward;
     applyAction(s,{type:'event_answer',itemId:active.id,answers:[...active._answers]},0);
@@ -32,12 +32,38 @@ test('binary decode gets 90 seconds and world events stay optional with independ
   for(const e of WORLD_EVENTS){
     const state=createState(0);state.generators[0]=1;settle(state,100_000);assert.equal(state.activeEvent,null);assert.equal(state.eventStats.losses,0);
     assert.throws(()=>applyAction(state,{type:'event_start',itemId:e.id},100_000),{code:'event_locked'});
-    assert.ok(e.rules&&e.description&&e.rewardClicks>0&&e.penaltyClicks>0);
+    assert.ok(e.rules&&e.description&&e.rewardClicks>0);
   }
 });
 test('events are optional; no failure or penalty occurs without explicit start',()=>{
   const s=createState(0);s.balance=100;s.generators[1]=1;
   settle(s,100000);assert.equal(s.eventStats.losses,0);assert.equal(s.activeEvent,null);assert.ok(s.balance>=100);
+});
+test('stake preview equals both reward and penalty in click-based and production-based cases',()=>{
+  for(const definition of EVENTS){
+    for(const stats of [{clickPower:1000,cps:1},{clickPower:1,cps:1e9}]){
+      const stakes=eventStakes(stats,definition),expected=Math.max(definition.rewardClicks*stats.clickPower,stats.cps*30);
+      assert.deepEqual(stakes,{reward:expected,penalty:expected});assert.equal('penaltyClicks' in definition,false);
+    }
+  }
+});
+test('both stakes remain fixed when production changes during a challenge',()=>{
+  const state=createState(0);state.generators[1]=1;state.balance=1000;
+  applyAction(state,{type:'event_start',itemId:'school'},0);const active=state.activeEvent;
+  assert.equal(active.reward,60);assert.equal(active.penalty,60);
+  state.generators[10]=1;state.prestige=10;
+  const wrong=active._answers.map((value,i)=>(value+1)%active.prompts[i].options.length);
+  applyAction(state,{type:'event_answer',itemId:active.id,answers:wrong},0);
+  assert.equal(state.balance,940);assert.equal(state.lastEventResult.penalty,60);assert.equal(state.totalEarned,0);
+});
+test('old active challenge stakes survive loading and still use their original penalty once',()=>{
+  const state=createState(0);state.generators[1]=1;state.balance=1000;
+  applyAction(state,{type:'event_start',itemId:'school'},0);
+  state.activeEvent.penalty=10;const restored=JSON.parse(JSON.stringify(state)),active=restored.activeEvent;
+  settle(restored,0);assert.equal(restored.activeEvent.reward,60);assert.equal(restored.activeEvent.penalty,10);
+  const wrong=active._answers.map((value,i)=>(value+1)%active.prompts[i].options.length);
+  applyAction(restored,{type:'event_answer',itemId:active.id,answers:wrong},0);
+  assert.equal(restored.balance,990);assert.equal(restored.lastEventResult.penalty,10);
 });
 test('wrong answers deduct only available balance and never reduce lifetime earnings',()=>{
   const s=createState(0);s.balance=3;s.totalEarned=100;s.runEarned=100;s.generators[1]=1;

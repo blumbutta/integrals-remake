@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createIntegralsHandler } from './router.mjs';
-import { PRESTIGE_PRICE } from '../shared/economy.mjs';
+import { PRESTIGE_PRICE, GENERATORS } from '../shared/economy.mjs';
 
 async function fixture(options={}){
   const dir=mkdtempSync(join(tmpdir(),'integrals-test-'));let time=1_000_000;
@@ -40,7 +40,7 @@ test('profile creation, durable recovery after reopen, hash-only storage and pub
   try{
     const created=await f.request(p+'/players','POST',{nickname:'Интегратор'});
     assert.equal(created.status,201);token=created.data.token;publicId=created.data.player.id;
-    assert.equal(created.data.player.listed,true);assert.equal(created.data.player.generators.length,10);
+    assert.equal(created.data.player.listed,true);assert.equal(created.data.player.generators.length,GENERATORS.length);
     const action=await f.request(p+'/action','POST',{id:actionId(1),type:'click',amount:20},token);
     assert.equal(action.data.player.totalEarned,20);
     const rating=await f.request(p+'/leaderboard');
@@ -137,6 +137,7 @@ test('event API keeps answers private, enforces unlock and scores only the serve
     const started=await f.request(p+'/action','POST',start,token);
     assert.equal(started.status,200);assert.equal(started.data.player.activeEvent._answers,undefined);
     assert.ok(!JSON.stringify(started.data).includes('_answers'));
+    assert.equal(started.data.player.activeEvent.penalty,started.data.player.activeEvent.reward);
     const saved=JSON.parse(db.prepare('SELECT state FROM integrals_players WHERE id=?').get(row.id).state),event=saved.activeEvent;
     assert.equal((await f.request(p+'/state','GET',undefined,token)).data.player.activeEvent._answers,undefined);
     const forged={id:actionId(31),type:'event_answer',itemId:event.id,answers:event._answers,reward:1e10};
@@ -161,5 +162,23 @@ test('server prestige rejects historical wealth without current funds and accept
     state.balance=PRESTIGE_PRICE;db.prepare('UPDATE integrals_players SET state=? WHERE id=?').run(JSON.stringify(state),row.id);
     const accepted=await f.request(p+'/action','POST',{id:actionId(41),type:'prestige'},token);
     assert.equal(accepted.status,200);assert.equal(accepted.data.player.balance,0);assert.equal(accepted.data.player.totalEarned,1e18);assert.equal(accepted.data.player.prestigeCount,1);db.close();
+  }finally{await f.close();}
+});
+test('persisted ten-stage profiles migrate on read and can buy the new generator without losing recovery data',async()=>{
+  const f=await fixture();try{
+    const {data:{token,player}}=await f.request(p+'/players','POST',{nickname:'Старая лаборатория'});
+    const db=new DatabaseSync(f.dbPath),row=db.prepare('SELECT * FROM integrals_players').get(),legacy=JSON.parse(row.state);
+    legacy.generators=[2,1,0,0,0,0,0,0,0,0];legacy.achievementRecords.generators=[5,2,0,0,0,0,0,0,0,0];
+    legacy.balance=20_000_000_000_000;legacy.totalEarned=30_000_000_000_000;legacy.runEarned=legacy.totalEarned;legacy.upgrades=['click-1'];legacy.achievements=['all','upgrades-24'];
+    db.prepare('UPDATE integrals_players SET state=? WHERE id=?').run(JSON.stringify(legacy),row.id);
+    const loaded=await f.request(p+'/state','GET',undefined,token);assert.equal(loaded.status,200);
+    const migrated=loaded.data.player;assert.equal(migrated.id,player.id);assert.equal(migrated.nickname,'Старая лаборатория');
+    assert.deepEqual(migrated.generators,[...legacy.generators,0]);assert.deepEqual(migrated.achievementRecords.generators,[...legacy.achievementRecords.generators,0]);
+    assert.equal(migrated.balance,legacy.balance);assert.equal(migrated.totalEarned,legacy.totalEarned);assert.equal(migrated.stats.cps,2.5);assert.ok(migrated.achievements.includes('all'));
+    const bought=await f.request(p+'/action','POST',{id:actionId(50),type:'buy',itemId:'superintelligence'},token);
+    assert.equal(bought.status,200);assert.equal(bought.data.player.generators[10],1);assert.equal(bought.data.player.balance,10_000_000_000_000);
+    assert.equal(bought.data.player.stats.cps,240_000_002.5);
+    const persisted=JSON.parse(db.prepare('SELECT state FROM integrals_players WHERE id=?').get(row.id).state);db.close();
+    assert.equal(persisted.generators.length,11);assert.equal(persisted.generators[10],1);assert.ok(persisted.achievements.includes('stage-superintelligence-1'));
   }finally{await f.close();}
 });
