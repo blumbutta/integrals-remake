@@ -2,11 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
-import { GENERATORS, UPGRADES, PRESTIGE_VERSION, normalizePrestige, createState, settle, applyAction, getStats, priceFor, upgradeAvailable, EconomyError } from '../shared/economy.mjs';
+import { GENERATORS, UPGRADES, PRESTIGE_VERSION, MAX_PRESTIGE, normalizePrestige, createState, settle, applyAction, getStats, priceFor, upgradeAvailable, EconomyError } from '../shared/economy.mjs';
 import { getPublicEvent, EventError } from '../shared/events.mjs';
 import { DEFAULT_EMOJI, isProfileEmoji, profileEmoji, normalizeNickname, nicknameValidationError, nicknameKey } from '../shared/profile.mjs';
 
 const PREFIX='/integrals-api';
+const RANKING_VERSION=2;
 const TOKEN_RE=/^ir_[A-Za-z0-9_-]{43}$/;
 export const ACTION_WINDOW_MS=15*60*1000;
 const ACTION_FUTURE_MS=60*1000;
@@ -40,7 +41,7 @@ async function bodyJSON(req){
   });
 }
 function publicPlayer(row,state,now){
-  return {economyVersion:state.economyVersion,prestigeVersion:state.prestigeVersion,revision:state.revision||0,id:row.public_id,nickname:row.display_nickname||row.nickname,emoji:profileEmoji(row.emoji),listed:!!row.listed,serverTime:now,lastSeen:state.lastSeen,lastSettled:state.lastSettled,balance:state.balance,totalEarned:state.totalEarned,runEarned:state.runEarned,clicks:state.clicks,generators:state.generators,upgrades:state.upgrades,achievements:state.achievements||[],achievementRecords:state.achievementRecords||{},activeEvent:getPublicEvent(state.activeEvent),eventCooldowns:state.eventCooldowns||{},eventStats:state.eventStats||{wins:0,losses:0},lastEventResult:state.lastEventResult||null,prestige:state.prestige,prestigeCount:state.prestigeCount,cosmicAscensions:state.cosmicAscensions||0,golden:state.golden,offlineEarned:state.offlineEarned,stats:getStats(state),generatorPrices:GENERATORS.map((g,i)=>priceFor(g.id,state.generators[i])),availableUpgrades:UPGRADES.filter(u=>upgradeAvailable(state,u)).map(u=>u.id)};
+  return {economyVersion:state.economyVersion,prestigeVersion:state.prestigeVersion,rankingVersion:state.rankingVersion,revision:state.revision||0,id:row.public_id,nickname:row.display_nickname||row.nickname,emoji:profileEmoji(row.emoji),listed:!!row.listed,serverTime:now,lastSeen:state.lastSeen,lastSettled:state.lastSettled,balance:state.balance,totalEarned:state.totalEarned,runEarned:state.runEarned,clicks:state.clicks,generators:state.generators,upgrades:state.upgrades,achievements:state.achievements||[],achievementRecords:state.achievementRecords||{},activeEvent:getPublicEvent(state.activeEvent),eventCooldowns:state.eventCooldowns||{},eventStats:state.eventStats||{wins:0,losses:0},lastEventResult:state.lastEventResult||null,prestige:state.prestige,prestigeCount:state.prestigeCount,cosmicAscensions:state.cosmicAscensions||0,golden:state.golden,offlineEarned:state.offlineEarned,stats:getStats(state),generatorPrices:GENERATORS.map((g,i)=>priceFor(g.id,state.generators[i])),availableUpgrades:UPGRADES.filter(u=>upgradeAvailable(state,u)).map(u=>u.id)};
 }
 const DEFAULT_ORIGIN_ALLOWED=origin=>!origin||origin==='https://blumbutta.github.io'||/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
@@ -68,6 +69,7 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
           PRIMARY KEY(player_id,action_id)
         );
         CREATE INDEX IF NOT EXISTS integrals_ranking ON integrals_players(listed,total_earned DESC);
+        CREATE INDEX IF NOT EXISTS integrals_ranking_prestige ON integrals_players(listed,prestige DESC);
         CREATE INDEX IF NOT EXISTS integrals_action_expiry ON integrals_actions(created_at);`);
       // Additive migrations preserve profile IDs, recovery hashes, state and receipts.
       tx(()=>{
@@ -93,15 +95,23 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
           update.run(key,display,row.id);claimed.add(key);reserved.add(key);
         }
         db.exec('CREATE UNIQUE INDEX IF NOT EXISTS integrals_nickname_unique ON integrals_players(nickname_key)');
-        // Normalize everyone before any request can read the ranking or settle
-        // offline income. This also covers hidden and long-absent profiles.
-        // No balances, timestamps, receipts or non-prestige columns change.
-        const savePrestige=db.prepare('UPDATE integrals_players SET state=?,prestige=? WHERE id=?');
-        for(const row of db.prepare('SELECT id,state,prestige FROM integrals_players').all()){
+        // Normalize the prestige multiplier before settling legacy accounts.
+        // Accrued production remains in their balance/lifetime statistics; the
+        // new ranking starts from zero once for players who already prestiged.
+        const migrationTime=now(),saveMigration=db.prepare('UPDATE integrals_players SET state=?,prestige=?,total_earned=? WHERE id=?');
+        for(const row of db.prepare('SELECT id,state,prestige,total_earned FROM integrals_players').all()){
           const state=JSON.parse(row.state),before=JSON.stringify(state);
           normalizePrestige(state);
+          if(state.rankingVersion!==RANKING_VERSION){
+            if(state.prestigeCount>0||state.cosmicAscensions>0){
+              settle(state,migrationTime);
+              state.legacyRanking??={runEarned:state.runEarned,resetAt:migrationTime};
+              state.runEarned=0;state.revision=(state.revision||0)+1;
+            }
+            state.rankingVersion=RANKING_VERSION;
+          }
           const after=JSON.stringify(state);
-          if(after!==before||row.prestige!==state.prestige)savePrestige.run(after,state.prestige,row.id);
+          if(after!==before||row.prestige!==state.prestige||row.total_earned!==state.totalEarned)saveMigration.run(after,state.prestige,state.totalEarned,row.id);
         }
       });
     }catch{
@@ -161,7 +171,7 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
     if(!db||closed)reject(503,'storage_unavailable','Облачное сохранение временно недоступно. Локальный прогресс работает.');
     limit(req,'request');
     pruneExpired(now());
-    if(path==='/health'&&req.method==='GET'){json(res,200,{ok:true,game:'integrals-remake',storage:'persistent',rankingPeriods:['all'],profileNames:'unique-required',economyVersion:2,prestigeVersion:PRESTIGE_VERSION});return;}
+    if(path==='/health'&&req.method==='GET'){json(res,200,{ok:true,game:'integrals-remake',storage:'persistent',rankingPeriods:['all'],rankingVersion:RANKING_VERSION,profileNames:'unique-required',economyVersion:2,prestigeVersion:PRESTIGE_VERSION,prestigeLimit:MAX_PRESTIGE});return;}
     if(path==='/players'&&req.method==='POST'){
       limit(req,'create');const body=await bodyJSON(req);
       if(Object.keys(body).some(k=>!['nickname','emoji'].includes(k)))reject(400,'invalid_fields','Передано неизвестное поле.');
@@ -212,7 +222,7 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
     if(path==='/leaderboard'&&req.method==='GET'){
       const period=search.get('period')||'all';
       if(period!=='all')reject(400,'unsupported_period','Пока доступен общий рейтинг за всё время.');
-      const entries=db.prepare("SELECT public_id AS id,COALESCE(display_nickname,nickname) AS nickname,emoji,total_earned AS totalEarned,json_extract(state,'$.balance') AS balance,prestige,COALESCE(json_extract(state,'$.cosmicAscensions'),0) AS cosmicAscensions FROM integrals_players WHERE listed=1 ORDER BY total_earned DESC,created_at ASC,id ASC LIMIT 100").all().map((row,i)=>({...row,emoji:profileEmoji(row.emoji),rank:i+1}));
+      const entries=db.prepare("SELECT public_id AS id,COALESCE(display_nickname,nickname) AS nickname,emoji,total_earned AS totalEarned,COALESCE(json_extract(state,'$.runEarned'),0) AS score,json_extract(state,'$.balance') AS balance,prestige,COALESCE(json_extract(state,'$.cosmicAscensions'),0) AS cosmicAscensions FROM integrals_players WHERE listed=1 ORDER BY prestige DESC,score DESC,created_at ASC,integrals_players.id ASC LIMIT 100").all().map((row,i)=>({...row,emoji:profileEmoji(row.emoji),rank:i+1}));
       json(res,200,{period:'all',entries,updatedAt:now()});return;
     }
     if(['/health','/players','/state','/action','/profile','/leaderboard'].includes(path))reject(405,'method_not_allowed','Этот метод не поддерживается.');

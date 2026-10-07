@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createLabWorld} from '../world.mjs';
-import {GENERATORS} from '../shared/economy.mjs';
+import {GENERATORS,MAX_PRESTIGE} from '../shared/economy.mjs';
 import {researchArtwork} from '../research-art.mjs';
 
 function browser(t){
@@ -148,7 +148,7 @@ test('the landscape fills wide and tall canvases while all landmark click target
 
 test('a completed cosmic cycle changes the empty world without revealing future inhabitants or events',t=>{
   const mock=browser(t),locations=[],world=mock.world({onLocation:value=>locations.push(value)});
-  for(const cosmicAscensions of [undefined,-1,Infinity,NaN]){
+  for(const cosmicAscensions of [undefined,0,-1,Infinity,NaN]){
     mock.clear();world.update({...newWorld(),cosmicAscensions});world.resize();
     assert.equal(mock.labels.includes('За гранью бесконечности'),false,'invalid or missing reward counters keep the ordinary world');
   }
@@ -170,8 +170,8 @@ test('a completed cosmic cycle changes the empty world without revealing future 
   assert.ok(mock.labels.includes('За гранью бесконечности'),'the static reward remains visible with reduced motion');
 });
 
-test('the century reset reveals the cosmic world after absorption and keeps it through later prestige resets',async t=>{
-  const mock=browser(t),world=mock.world(),old={...oldWorld(),prestige:100,cosmicAscensions:0},fresh={...newWorld(),prestige:0,cosmicAscensions:1};
+test('the full-cycle reset reveals the cosmic world after absorption and keeps it through later prestige resets',async t=>{
+  const mock=browser(t),world=mock.world(),old={...oldWorld(),prestige:MAX_PRESTIGE,cosmicAscensions:0},fresh={...newWorld(),prestige:0,cosmicAscensions:1};
   world.update(old);const animation=world.playPrestige({state:old,durationMs:6500});world.update(fresh);
   mock.clear();mock.frameAt(6500*.62);
   assert.ok(mock.paint.some(p=>p.color==='#244944'));

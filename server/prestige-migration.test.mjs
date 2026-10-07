@@ -67,7 +67,7 @@ test('startup migrates all accounts and ranking before reads, preserves saves an
         assert.ok(state.activeEvent.reward<1000,'an in-flight challenge cannot preserve the runaway bonus');
       }
       assert.deepEqual(withoutPrestige(state),expectedOther);
-      assert.ok(getStats(state).multiplier<=11);
+      assert.ok(getStats(state).multiplier<=1+MAX_PRESTIGE*.1);
       if(i<3)assert.deepEqual(state.legacyPrestige,{points:example.points,count:example.count});
     }
     assert.equal(migrated[5].state,JSON.stringify(before[5]),'already normalized state is not rewritten');

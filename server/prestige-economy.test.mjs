@@ -15,17 +15,17 @@ test('each ordinary reset awards exactly one level regardless of run earnings, n
     assert.ok(state.achievements.includes(`prestige:${level}`));
     assert.throws(()=>applyAction(state,{type:'prestige'},0),{code:'prestige_locked'});
   }
-  assert.equal(state.cosmicAscensions,0,'reaching level 100 alone does not grant the final reward');
-  assert.equal(getStats(state).multiplier,11);
+  assert.equal(state.cosmicAscensions,0,'reaching the final level alone does not grant the reward');
+  assert.equal(getStats(state).multiplier,1+MAX_PRESTIGE*.1);
 });
 
-test('paid transition FROM level 100 resets ranking and level, permanently awards the world and keeps account history',()=>{
-  const state=createState(0);state.prestige=state.prestigeCount=100;
+test('paid transition FROM the final level resets ranking and level, permanently awards the world and keeps account history',()=>{
+  const state=createState(0);state.prestige=state.prestigeCount=MAX_PRESTIGE;
   state.totalEarned=1e20;state.runEarned=1e18;state.balance=PRESTIGE_PRICE-1;
   state.generators[10]=4;state.upgrades=['click-1'];state.clicks=75000;
-  state.achievements=['first','prestige:100'];state.eventStats={wins:8,losses:3};
+  state.achievements=['first',`prestige:${MAX_PRESTIGE}`];state.eventStats={wins:8,losses:3};
   assert.throws(()=>applyAction(state,{type:'prestige'},0),{code:'prestige_locked'});
-  assert.equal(state.cosmicAscensions,0);assert.equal(state.totalEarned,1e20);assert.equal(state.prestigeCount,100);
+  assert.equal(state.cosmicAscensions,0);assert.equal(state.totalEarned,1e20);assert.equal(state.prestigeCount,MAX_PRESTIGE);
   state.balance=PRESTIGE_PRICE;
   assert.throws(()=>applyAction(state,{type:'prestige'},0),{code:'cosmic_confirmation_required'});
   assert.equal(state.totalEarned,1e20);assert.equal(state.cosmicAscensions,0);assert.equal(state.balance,PRESTIGE_PRICE);
@@ -34,7 +34,7 @@ test('paid transition FROM level 100 resets ranking and level, permanently award
   assert.equal(state.cosmicAscensions,1);assert.equal(state.prestigeCount,0);assert.equal(state.prestige,0);
   assert.equal(state.totalEarned,0);assert.equal(state.balance,0);assert.equal(state.runEarned,0);
   assert.equal(state.clicks,75000);assert.deepEqual(state.eventStats,{wins:8,losses:3});
-  assert.ok(state.achievements.includes('prestige:100'));assert.equal(getStats(state).multiplier,1);
+  assert.ok(state.achievements.includes(`prestige:${MAX_PRESTIGE}`));assert.equal(getStats(state).multiplier,1);
   assert.throws(()=>applyAction(state,{type:'prestige'},0),{code:'prestige_locked'});
   const restored=JSON.parse(JSON.stringify(state));normalizePrestige(restored);
   assert.equal(restored.cosmicAscensions,1);
@@ -57,7 +57,7 @@ test('legacy inflated points are corrected by actual cycles with no reset of sav
   for(const field of ['balance','totalEarned','runEarned','generators','upgrades','achievements'])assert.deepEqual(state[field],before[field]);
   const normalized=structuredClone(state);normalizePrestige(state);assert.deepEqual(state,normalized);
   state.prestige=9e99;state.prestigeCount=150;normalizePrestige(state);
-  assert.equal(state.prestigeCount,100);assert.equal(state.prestige,100);assert.equal(getStats(state).multiplier,11);
+  assert.equal(state.prestigeCount,MAX_PRESTIGE);assert.equal(state.prestige,MAX_PRESTIGE);assert.equal(getStats(state).multiplier,1+MAX_PRESTIGE*.1);
   assert.deepEqual(state.legacyPrestige,{points:75000,count:1});assert.equal(state.cosmicAscensions,0);
 });
 

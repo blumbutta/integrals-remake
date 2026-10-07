@@ -18,7 +18,7 @@ function request(api,path,method='GET',body,token){return new Promise(resolve=>{
   assert.equal(api.handle(req,res),true);
 });}
 
-test('paid ascension from 100 resets the authoritative ranking and awards once across retries and restart',async()=>{
+test('paid ascension from the prestige limit resets the authoritative ranking and awards once across retries and restart',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'integrals-cosmic-ascension-')),dbPath=join(dir,'game.sqlite');let api,clock=initialTime;
   try{
     api=createIntegralsHandler({dbPath,now:()=>clock});
@@ -34,12 +34,12 @@ test('paid ascension from 100 resets the authoritative ranking and awards once a
     const db=new DatabaseSync(dbPath),row=db.prepare('SELECT * FROM integrals_players WHERE public_id=?').get(champion.player.id),state=JSON.parse(row.state);
     state.prestige=MAX_PRESTIGE;state.prestigeCount=MAX_PRESTIGE;
     state.balance=PRESTIGE_PRICE;state.totalEarned=PRESTIGE_PRICE*10;state.runEarned=PRESTIGE_PRICE*2;
-    state.achievements=['prestige:100'];state.legacyPrestige={points:1e100,count:100};
+    state.achievements=[`prestige:${MAX_PRESTIGE}`];state.legacyPrestige={points:1e100,count:100};
     db.prepare('UPDATE integrals_players SET state=?,prestige=?,total_earned=? WHERE id=?').run(JSON.stringify(state),MAX_PRESTIGE,state.totalEarned,row.id);db.close();
 
     api=createIntegralsHandler({dbPath,now:()=>clock});
     const before=(await request(api,'/state','GET',undefined,champion.token)).data.player;
-    assert.equal(before.prestige,100);assert.equal(before.cosmicAscensions,0,'startup does not grant an ascension for reaching 100');
+    assert.equal(before.prestige,MAX_PRESTIGE);assert.equal(before.cosmicAscensions,0,'startup does not grant an ascension for reaching the prestige limit');
     assert.equal((await request(api,'/leaderboard')).data.entries[0].id,champion.player.id);
     const deniedAction={id:actionId(2),type:'prestige'};
     const prior=new DatabaseSync(dbPath),beforeConfirmation=prior.prepare('SELECT * FROM integrals_players WHERE id=?').get(row.id);prior.close();
@@ -63,7 +63,7 @@ test('paid ascension from 100 resets the authoritative ranking and awards once a
     const ranking=(await request(api,'/leaderboard')).data.entries;
     assert.deepEqual(ranking.map(entry=>entry.id),[other.player.id,champion.player.id,beginner.player.id]);
     const ranked=ranking.find(entry=>entry.id===champion.player.id);
-    assert.equal(ranked.rank,2);assert.equal(ranked.totalEarned,0);assert.equal(ranked.prestige,0);assert.equal(ranked.cosmicAscensions,1);
+    assert.equal(ranked.rank,2);assert.equal(ranked.score,0);assert.equal(ranked.totalEarned,0);assert.equal(ranked.prestige,0);assert.equal(ranked.cosmicAscensions,1);
     const stored=new DatabaseSync(dbPath),saved=stored.prepare('SELECT state,total_earned,prestige,token_hash,created_at FROM integrals_players WHERE id=?').get(row.id);
     assert.equal(saved.total_earned,0);assert.equal(saved.prestige,0);
     assert.equal(saved.token_hash,row.token_hash);assert.equal(saved.created_at,row.created_at);
@@ -82,7 +82,7 @@ test('paid ascension from 100 resets the authoritative ranking and awards once a
     const unfunded=await request(api,'/action','POST',{id:actionId(3),type:'prestige'},champion.token);
     assert.equal(unfunded.status,400);assert.equal(unfunded.data.error.code,'prestige_locked');
     const finalRank=(await request(api,'/leaderboard')).data.entries.find(entry=>entry.id===champion.player.id);
-    assert.equal(finalRank.cosmicAscensions,1);assert.equal(finalRank.totalEarned,0);assert.equal(finalRank.rank,2);
+    assert.equal(finalRank.cosmicAscensions,1);assert.equal(finalRank.score,0);assert.equal(finalRank.totalEarned,0);assert.equal(finalRank.rank,2);
   }finally{api?.close();rmSync(dir,{recursive:true,force:true});}
 });
 

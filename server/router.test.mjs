@@ -75,7 +75,7 @@ test('authentication, independent router, origin filtering and explicit unsuppor
   const f=await fixture();try{
     assert.equal((await f.request('/health')).data,'existing-game');
     const health=await f.request(p+'/health');assert.equal(health.status,200);
-    assert.equal(health.data.profileNames,'unique-required');assert.equal(health.data.economyVersion,2);
+    assert.equal(health.data.profileNames,'unique-required');assert.equal(health.data.economyVersion,2);assert.equal(health.data.rankingVersion,2);
     assert.equal((await f.request(p+'/state')).status,401);
     assert.equal((await f.request(p+'/state','GET',undefined,'ir_'+ 'a'.repeat(43))).status,401);
     assert.equal((await f.request(p+'/players','POST',{},undefined,{Origin:'https://attacker.invalid'})).status,403);
@@ -93,7 +93,7 @@ test('profile creation, durable recovery after reopen, hash-only storage and pub
     const action=await f.request(p+'/action','POST',{id:actionId(1),type:'click',amount:20},token);
     assert.equal(action.data.player.totalEarned,20);
     const rating=await f.request(p+'/leaderboard');
-    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','totalEarned']);
+    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','score','totalEarned']);
     assert.equal(rating.data.entries[0].id,publicId);assert.ok(!JSON.stringify(rating.data).includes(token));
     const hide=await f.request(p+'/profile','PATCH',{listed:false},token);assert.equal(hide.data.player.listed,false);
     assert.equal((await f.request(p+'/leaderboard')).data.entries.length,0);
@@ -164,24 +164,29 @@ test('curated emoji choices validate on create and update, persist on reads and 
     assert.deepEqual(rows.map(row=>({...row})),[{nickname:'Новая теорема',emoji:PROFILE_EMOJIS.at(-1),total_earned:0}]);
   }finally{await f.close();}
 });
-test('leaderboard reports separate current balance, lifetime score, prestige, emoji and rank without private state',async()=>{
+test('leaderboard sorts prestige before current-cycle earnings, independently of lifetime totals and remaining balance',async()=>{
   const f=await fixture();try{
     const first=(await f.request(p+'/players','POST',{nickname:'Первый',emoji:'🚀'})).data;
     const second=(await f.request(p+'/players','POST',{nickname:'Второй',emoji:'🤖'})).data;
+    const third=(await f.request(p+'/players','POST',{nickname:'Третий',emoji:'🧪'})).data;
     await f.request(p+'/action','POST',{id:actionId(60),type:'click',amount:20},first.token);
     await f.request(p+'/action','POST',{id:actionId(61),type:'buy',itemId:'autoclick'},first.token);
     await f.request(p+'/action','POST',{id:actionId(62),type:'click',amount:19},second.token);
     const db=new DatabaseSync(f.dbPath),row=db.prepare('SELECT * FROM integrals_players WHERE public_id=?').get(second.player.id),state=JSON.parse(row.state);
-    state.prestige=7;db.prepare('UPDATE integrals_players SET state=?,prestige=? WHERE id=?').run(JSON.stringify(state),7,row.id);db.close();
+    state.prestige=7;state.prestigeCount=7;db.prepare('UPDATE integrals_players SET state=?,prestige=? WHERE id=?').run(JSON.stringify(state),7,row.id);
+    const thirdRow=db.prepare('SELECT * FROM integrals_players WHERE public_id=?').get(third.player.id),thirdState=JSON.parse(thirdRow.state);
+    thirdState.prestige=7;thirdState.prestigeCount=7;thirdState.totalEarned=1e12;thirdState.runEarned=18;thirdState.balance=1e6;
+    db.prepare('UPDATE integrals_players SET state=?,prestige=?,total_earned=? WHERE id=?').run(JSON.stringify(thirdState),7,thirdState.totalEarned,thirdRow.id);db.close();
     const rating=(await f.request(p+'/leaderboard')).data;
     assert.deepEqual(rating.entries,[
-      {id:first.player.id,nickname:'Первый',emoji:'🚀',totalEarned:20,balance:5,prestige:0,cosmicAscensions:0,rank:1},
-      {id:second.player.id,nickname:'Второй',emoji:'🤖',totalEarned:19,balance:19,prestige:7,cosmicAscensions:0,rank:2},
+      {id:second.player.id,nickname:'Второй',emoji:'🤖',totalEarned:19,score:19,balance:19,prestige:7,cosmicAscensions:0,rank:1},
+      {id:third.player.id,nickname:'Третий',emoji:'🧪',totalEarned:1e12,score:18,balance:1e6,prestige:7,cosmicAscensions:0,rank:2},
+      {id:first.player.id,nickname:'Первый',emoji:'🚀',totalEarned:20,score:20,balance:5,prestige:0,cosmicAscensions:0,rank:3},
     ]);
     assert.ok(!JSON.stringify(rating).includes(first.token));assert.ok(!JSON.stringify(rating).includes(second.token));
-    for(const entry of rating.entries)assert.deepEqual(Object.keys(entry).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','totalEarned']);
+    for(const entry of rating.entries)assert.deepEqual(Object.keys(entry).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','score','totalEarned']);
     await f.request(p+'/profile','PATCH',{listed:false},first.token);
-    const hidden=(await f.request(p+'/leaderboard')).data.entries;assert.equal(hidden.length,1);assert.equal(hidden[0].id,second.player.id);assert.equal(hidden[0].rank,1);
+    const hidden=(await f.request(p+'/leaderboard')).data.entries;assert.equal(hidden.length,2);assert.equal(hidden[0].id,second.player.id);assert.equal(hidden[0].rank,1);
   }finally{await f.close();}
 });
 test('old database receives an additive emoji migration and recovery, receipts and selected emoji survive restart',async()=>{
@@ -214,7 +219,7 @@ test('old database receives an additive emoji migration and recovery, receipts a
     await f.close();f=await fixture({dbPath});
     const reopened=(await f.request(p+'/state','GET',undefined,token)).data.player;
     assert.equal(reopened.emoji,'⚛️');assert.equal(reopened.id,publicId);assert.equal(reopened.nickname,'Прежний профиль');assert.equal(reopened.totalEarned,12345);assert.equal(reopened.balance,73.5);assert.equal(reopened.prestige,7);
-    const rating=(await f.request(p+'/leaderboard')).data;assert.deepEqual(rating.entries,[{id:publicId,nickname:'Прежний профиль',emoji:'⚛️',totalEarned:12345,balance:73.5,prestige:7,cosmicAscensions:0,rank:1}]);
+    const rating=(await f.request(p+'/leaderboard')).data;assert.deepEqual(rating.entries,[{id:publicId,nickname:'Прежний профиль',emoji:'⚛️',totalEarned:12345,score:345,balance:73.5,prestige:7,cosmicAscensions:0,rank:1}]);
     assert.ok(!JSON.stringify(rating).includes(token));assert.ok(!JSON.stringify(rating).includes(tokenHash));
     const persisted=new DatabaseSync(dbPath);assert.equal(persisted.prepare('PRAGMA table_info(integrals_players)').all().filter(column=>column.name==='emoji').length,1);assert.equal(persisted.prepare('SELECT token_hash FROM integrals_players WHERE id=42').get().token_hash,tokenHash);persisted.close();
   }finally{if(f?.server.listening)await f.close();rmSync(dir,{recursive:true,force:true});}
@@ -333,7 +338,11 @@ test('server prestige rejects historical wealth without current funds and accept
     assert.equal(JSON.parse(db.prepare('SELECT state FROM integrals_players WHERE id=?').get(row.id).state).prestigeCount,0);
     state.balance=PRESTIGE_PRICE;db.prepare('UPDATE integrals_players SET state=? WHERE id=?').run(JSON.stringify(state),row.id);
     const accepted=await f.request(p+'/action','POST',{id:actionId(41),type:'prestige'},token);
-    assert.equal(accepted.status,200);assert.equal(accepted.data.player.balance,0);assert.equal(accepted.data.player.totalEarned,1e18);assert.equal(accepted.data.player.prestigeCount,1);db.close();
+    assert.equal(accepted.status,200);assert.equal(accepted.data.player.balance,0);assert.equal(accepted.data.player.totalEarned,1e18);assert.equal(accepted.data.player.prestigeCount,1);assert.equal(accepted.data.player.runEarned,0);db.close();
+    const rank=(await f.request(p+'/leaderboard')).data.entries[0];
+    assert.equal(rank.score,0);assert.equal(rank.totalEarned,1e18);assert.equal(rank.prestige,1);
+    await f.request(p+'/action','POST',{id:actionId(42),type:'click',amount:1},token);
+    assert.equal((await f.request(p+'/leaderboard')).data.entries[0].score,1.1,'only earnings after the prestige rebuild the ranking score');
   }finally{await f.close();}
 });
 test('persisted ten-stage profiles migrate on read and can buy the new generator without losing recovery data',async()=>{

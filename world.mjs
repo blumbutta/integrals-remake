@@ -130,7 +130,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     // Grass and stones are deterministic and do not allocate during a frame.
     for(let i=0;i<76;i++){const x=20+seed(i+803)*1160,y=425+seed(i+913)*315;if(y>700||x<53||x>1150||seed(i+71)>.47){line([[x-2,y],[x-4,y-5],[x,y-2],[x+3,y-7]],'rgba(135,167,111,.3)',1);}}
   }
-  // A permanent reward after a complete century of worlds: new geometry, not a
+  // A permanent reward after a complete cycle of worlds: new geometry, not a
   // colour filter. All loops have fixed budgets and honour the normal RAF gate.
   function cosmicSky(){
     const g=ctx.createLinearGradient(0,view.top,0,view.bottom);g.addColorStop(0,'#080b23');g.addColorStop(.45,'#17233d');g.addColorStop(1,'#101b35');ctx.fillStyle=g;ctx.fillRect(view.left,view.top,view.right-view.left,view.bottom-view.top);

@@ -91,6 +91,12 @@ test('opening the black hole and the first confirmation stay in the laboratory w
   assert.equal(h.context.currentPage,'lab');assert.equal(h.element('#prestige-dialog').open,true);
   assert.equal(h.element('#prestige-step-one').hidden,false);assert.equal(h.element('#prestige-step-two').hidden,true);
   assert.equal(h.element('#prestige-confirm').disabled,false);
+  assert.match(h.element('#prestige-preserved-note').textContent,/Рейтинговая сумма начнётся с нуля/);
+  assert.match(h.element('#prestige-preserved-note').textContent,/престиж вырастет на 1/);
+  assert.match(h.element('#prestige-preserved-note').textContent,/Общий заработок за всё время и достижения сохранятся/);
+  assert.doesNotMatch(h.element('#prestige-preserved-note').textContent,/место в рейтинге сохранятся/);
+  assert.match(h.element('#prestige-reset-items').textContent,/рейтинговая сумма/);
+  assert.doesNotMatch(h.element('#prestige-kept-items').textContent,/рейтинг/);
   assert.deepEqual(h.calls,['dialog:open']);
   h.fire('#prestige-confirm');
   assert.equal(h.context.currentPage,'lab');assert.equal(h.element('#prestige-step-one').hidden,true);
@@ -120,6 +126,7 @@ test('only the accepted second confirmation opens the world, then plays the prev
   assert.equal(JSON.stringify(h.snapshots[0].state),JSON.stringify(before),'the cinematic receives the intact old world');
   assert.notEqual(h.snapshots[0].state,h.context.state);
   assert.equal(h.context.state.balance,0);assert.equal(h.context.state.prestigeCount,1);
+  assert.equal(h.context.state.runEarned,0);assert.equal(h.context.state.totalEarned,before.totalEarned,'ordinary prestige preserves lifetime earnings while resetting ranking earnings');
   assert.deepEqual(h.actions,[{type:'prestige'}],'an ordinary reset never sends cosmic reset consent');
   assert.ok(h.context.state.generators.every(count=>count===0));
   assert.equal(h.snapshots[1].next.prestigeCount,1,'the world is updated to the accepted new epoch');
@@ -152,14 +159,14 @@ test('a refused or failed prestige leaves the current world, account and theme i
 });
 
 
-test('the paid transition from prestige 100 clearly warns twice, resets rating, and keeps its permanent world award',async()=>{
+test('the paid transition from the prestige cap clearly warns twice, resets rating, and keeps its permanent world award',async()=>{
   const h=harness();h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE;
   h.context.state.totalEarned=PRESTIGE_PRICE*50;
   h.context.state.balance=PRESTIGE_PRICE-1;h.context.openPrestige();
-  assert.equal(h.element('#prestige-confirm').disabled,true,'level 100 still requires the full purchase price');
+  assert.equal(h.element('#prestige-confirm').disabled,true,'the maximum level still requires the full purchase price');
   assert.match(h.element('#prestige-cost-warning').innerHTML,/мировом рейтинге обнулятся/);
-  assert.match(h.element('#prestige-details').innerHTML,/0 \/ 100/);
-  assert.match(h.element('#prestige-details').innerHTML,/>×11</);
+  assert.ok(h.element('#prestige-details').innerHTML.includes(`0 / ${MAX_PRESTIGE}`));
+  assert.ok(h.element('#prestige-details').innerHTML.includes(`>×${1+MAX_PRESTIGE*.1}<`));
   assert.match(h.element('#prestige-details').innerHTML,/>×1</);
   assert.match(h.element('#prestige-details').innerHTML,/Постоянная награда/);
   assert.doesNotMatch(h.element('#prestige-details').innerHTML,/\+0 уровень|prestige:101/);
@@ -181,7 +188,7 @@ test('the paid transition from prestige 100 clearly warns twice, resets rating, 
   assert.ok(h.context.state.achievements.includes('first'));
 });
 
-test('level 100 remains a purchasable final cycle while the god emblem requires actual permanent ownership',()=>{
+test('the maximum level remains a purchasable final cycle while the god emblem requires actual permanent ownership',()=>{
   const h=harness(),avatar=h.element('avatar');
   h.context.emoji='🧪';h.context.$$=()=>[avatar];
   const mark=app.slice(app.indexOf('const blackHoleOwnerMark='),app.indexOf('\nfunction renderProfileFrame'));
@@ -215,7 +222,7 @@ test('restoring a local save preserves completed cosmic cycles and the archived 
 
 
 test('a level change between confirmations requires showing the new destructive terms before sending consent',async()=>{
-  const h=harness();h.context.state.prestige=h.context.state.prestigeCount=99;
+  const h=harness();h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE-1;
   h.context.openPrestige();h.fire('#prestige-confirm');
   h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE;
   await h.fire('#prestige-final-confirm');
@@ -223,4 +230,26 @@ test('a level change between confirmations requires showing the new destructive 
   assert.equal(h.context.currentPage,'lab');assert.equal(h.element('#prestige-step-one').hidden,false);
   assert.match(h.element('#prestige-cost-warning').innerHTML,/мировом рейтинге обнулятся/);
   assert.equal(h.context.prestigeSubmitting,false);
+});
+
+
+test('ranking displays cycle score and never falls back to lifetime earnings',async()=>{
+  const h=harness();
+  h.context.request=async()=>({entries:[
+    {id:'a',nickname:'Первый',emoji:'🧪',prestige:2,rank:1,score:4321,totalEarned:999999999},
+    {id:'b',nickname:'Второй',emoji:'∫',prestige:1,rank:2,runEarned:1234,totalEarned:888888888},
+    {id:'c',nickname:'Третий',emoji:'∫',prestige:0,rank:3,totalEarned:777777777},
+  ]});
+  h.context.profileEmoji=value=>value;h.context.blackHoleOwnerMark='';
+  h.element('#refresh-ranking').querySelector=()=>h.element('refresh-label');
+  new Script(declaration('loadRanking')).runInContext(h.context);
+  await h.context.loadRanking();
+  const markup=h.element('#ranking-content').innerHTML;
+  assert.match(markup,/Сначала престиж, затем интегралы за текущий цикл/);
+  assert.match(markup,/>Интегралы за цикл</);
+  assert.match(markup,/<strong>4321 ∫<\/strong>/);
+  assert.match(markup,/<strong>1234 ∫<\/strong>/);
+  assert.match(markup,/<strong>0 ∫<\/strong>/);
+  assert.doesNotMatch(markup,/999999999|888888888|777777777/);
+  assert.ok(markup.indexOf('Первый')<markup.indexOf('Второй'),'the server prestige-first ordering is preserved');
 });

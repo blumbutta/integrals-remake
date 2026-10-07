@@ -3,7 +3,7 @@ import { collectAchievements as unlockAchievements } from './achievements.mjs';
 
 export const ECONOMY_VERSION = 2;
 export const PRESTIGE_VERSION = 2;
-export const MAX_PRESTIGE = 100;
+export const MAX_PRESTIGE = 10;
 export const MAX_OFFLINE_MS = 12 * 60 * 60 * 1000;
 export const ACTIVE_GRACE_MS = 30_000;
 export const GOLDEN_WINDOW_MS = 15_000;
@@ -64,7 +64,7 @@ const fail=(code,message)=>{throw new EconomyError(code,message);};
 const bounded=value=>Math.min(1e250,Math.max(0,value));
 const schedule=(now,random=Math.random)=>now+90_000+Math.floor(Math.max(0,Math.min(0.99999999,random()))*90_001);
 export function createState(now=Date.now()) {
-  return {version:1,economyVersion:ECONOMY_VERSION,prestigeVersion:PRESTIGE_VERSION,cosmicAscensions:0,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
+  return {version:1,economyVersion:ECONOMY_VERSION,prestigeVersion:PRESTIGE_VERSION,rankingVersion:2,cosmicAscensions:0,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
 }
 // Append the new stage without resetting valid progress, peak records or active stakes.
 // This is a schema migration; callers still validate untrusted imported saves.
@@ -200,9 +200,9 @@ export function applyAction(state,action,now=Date.now()) {
     if(state.activeEvent)fail('event_active','Заверши испытание перед перерождением.');
     if(state.balance<PRESTIGE_PRICE)fail('prestige_locked','Для перерождения нужно 999 999 999 999 999 интегралов на балансе.');
     const gain=getStats(state).prestigeGain,cosmicAscension=state.prestigeCount===MAX_PRESTIGE;
-    if(cosmicAscension&&action.confirmCosmicReset!==true)fail('cosmic_confirmation_required','Обновите игру и подтвердите сброс рейтинга при переходе со 100-го престижа.');
+    if(cosmicAscension&&action.confirmCosmicReset!==true)fail('cosmic_confirmation_required','Обновите игру и подтвердите сброс рейтинга при переходе с последнего престижа.');
     if(cosmicAscension){
-      // Finishing the hundredth universe starts a new ranking run. The award
+      // Finishing the last universe starts a new ranking run. The award
       // belongs to the account and survives this and all subsequent resets.
       state.cosmicAscensions=Math.min(Number.MAX_SAFE_INTEGER,state.cosmicAscensions+1);
       state.totalEarned=0;state.prestigeCount=0;state.lastEventResult=null;
