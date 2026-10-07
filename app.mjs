@@ -77,7 +77,17 @@ function save(){
   writeStorage(STORAGE,JSON.stringify({version:1,state,nickname,emoji,listed,sound,musicVolume,selectedCosmetic,cinematicSound,achievements:[...earnedAchievements],pending:mode==='cloud'?pending:[],mode}));
 }
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').hidden=true,4200);}
-function setStatus(text,kind='local'){$('#save-status').innerHTML=`<i></i>${esc(text)}`;$('#save-status').className=`save-status ${kind}`;}
+function setStatus(text,kind='local'){
+  if(readOnlyTab){text='Только просмотр';kind='readonly';}
+  const status=$('#save-status');
+  status.innerHTML=`<i aria-hidden="true">${kind==='readonly'?'🔒':''}</i><span>${esc(text)}</span>`;status.className=`save-status ${kind}`;
+  status.setAttribute('aria-label',readOnlyTab?'Только просмотр. Узнать, как продолжить игру':`${text}. Открыть профиль и сохранение`);
+  if(readOnlyTab)status.title='Игра активна в другой вкладке. Нажмите, чтобы узнать, как продолжить.';
+}
+function showReadOnlyNotice(){
+  const dialog=$('#read-only-dialog');
+  if(!dialog.open)dialog.showModal();
+}
 function showBanner(message,connectButton=false){const b=$('#connection-banner');b.hidden=!message;b.replaceChildren();if(!message)return;const span=document.createElement('span');span.textContent=message;b.append(span);if(connectButton){const btn=document.createElement('button');btn.className='text-button';btn.textContent='Подключить облако →';btn.addEventListener('click',connectCloud);b.append(btn);}}
 function reportCloudFailure(error){
   if(error.code==='stale_response')return;
@@ -133,7 +143,14 @@ function acceptPlayer(player){
 }
 function showOffline(value){if(value<1)return;$('#offline-earned').textContent=`+${fmt(value)} ∫`;if(!$$('dialog[open]').length)$('#offline-dialog').showModal();}
 async function init(){
-  if(readOnlyTab){setStatus('Только просмотр');showBanner('Лаборатория уже открыта в другой вкладке. Здесь доступен просмотр. Закройте другую вкладку и обновите эту, чтобы продолжить.');render(true);return;}
+  if(readOnlyTab){
+    setStatus('Только просмотр','readonly');document.body.classList.add('read-only');
+    $('#click-mode-hint').textContent='🔒 Только просмотр · нажмите на интеграл, чтобы узнать, как продолжить';
+    $('#integral-button').setAttribute('aria-label','Только просмотр. Как продолжить игру');
+    showBanner('🔒 Только просмотр: игра активна в другой вкладке. Здесь нельзя собирать интегралы и покупать ресурсы.');
+    const details=document.createElement('button');details.type='button';details.className='text-button';details.textContent='Как продолжить игру →';details.addEventListener('click',showReadOnlyNotice);$('#connection-banner').append(details);
+    render(true);return;
+  }
   if(mode==='cloud'){
     await syncCloud();
   }else{
@@ -185,9 +202,10 @@ async function performFlush(){
   finally{if(flushEpoch!==sessionEpoch)return;busy=false;if(!connected){for(const resolve of actionWaiters.values())resolve(false);actionWaiters.clear();}render();}
 }
 async function act(action){
+  if(readOnlyTab){showReadOnlyNotice();return false;}
   if(needsName){openWelcome();return false;}
   if(cinematicActive&&action.type!=='prestige'){toast('Дождитесь рождения нового мира');return false;}
-  if(readOnlyTab){toast('Продолжите игру в первой вкладке');return false;}if(transitioning){toast('Подключаем лабораторию…');return false;}
+  if(transitioning){toast('Подключаем лабораторию…');return false;}
   if(mode==='cloud'){
     if(!connected){toast('Дождитесь соединения с сервером');return false;}
     queueClicks();const queued={id:`${Date.now()+clockOffset}-${crypto.randomUUID()}`,...action};const done=new Promise(resolve=>actionWaiters.set(queued.id,resolve));pending.push(queued);save();flush();return done;
@@ -200,9 +218,10 @@ function blip(kind='click'){
   try{audio??=new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();const osc=audio.createOscillator(),gain=audio.createGain();osc.connect(gain);gain.connect(audio.destination);osc.type='sine';osc.frequency.setValueAtTime(kind==='buy'?660:400+Math.random()*160,audio.currentTime);osc.frequency.exponentialRampToValueAtTime(kind==='buy'?990:280,audio.currentTime+.07);gain.gain.setValueAtTime(.035,audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.1);osc.start();osc.stop(audio.currentTime+.11);}catch{}
 }
 function clickIntegral(event){
+  if(readOnlyTab){showReadOnlyNotice();return;}
   if(needsName){openWelcome();return;}
   if(cinematicActive)return;
-  if(readOnlyTab){toast('Продолжите игру в первой вкладке');return;}if(transitioning){toast('Подключаем лабораторию…');return;}
+  if(transitioning){toast('Подключаем лабораторию…');return;}
   if(mode==='cloud'&&!connected){toast('Восстанавливаем соединение с облаком…');return;}
   const now=performance.now();clickCredit=Math.min(24,clickCredit+(now-lastClickTime)*.012);lastClickTime=now;if(clickCredit<1)return;clickCredit--;
   const power=getStats(projected()).clickPower;
@@ -213,7 +232,10 @@ function clickIntegral(event){
 }
 $('#integral-button').addEventListener('click',clickIntegral);
 document.addEventListener('keydown',event=>{if(event.code==='Space'&&!event.repeat&&currentPage==='lab'&&!$$('dialog[open]').length&&!event.target.closest('input,textarea,button,a,summary,select')){event.preventDefault();clickIntegral();}});
-$('#golden-button').addEventListener('click',async()=>{if(goldenClaiming)return;goldenClaiming=true;$('#golden-button').hidden=true;try{await act({type:'golden'});}finally{goldenClaiming=false;render();}});
+$('#golden-button').addEventListener('click',async()=>{if(readOnlyTab){showReadOnlyNotice();return;}if(goldenClaiming)return;goldenClaiming=true;$('#golden-button').hidden=true;try{await act({type:'golden'});}finally{goldenClaiming=false;render();}});
+function renderGolden(s,now){
+  $('#golden-button').hidden=readOnlyTab||needsName||goldenClaiming||cinematicActive||Boolean($$('dialog[open]').length)||(mode==='cloud'&&!connected)||!(s.golden?.availableUntil>now&&s.golden?.nextAt<=now);
+}
 function maxQuantity(g,index,balance){let count=0;while(count<100&&priceFor(g.id,state.generators[index],count+1)<=balance)count++;return Math.max(1,count);}
 let lastShopStamp='',lastAchievementStamp='';
 function renderBalance(value){
@@ -241,7 +263,7 @@ function render(force=false){
   const nextIndex=s.generators.findIndex(v=>v===0),goal=nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance;
   $('#goal-text').textContent=nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':s.totalEarned>=GENERATORS[nextIndex].basePrice?GENERATORS[nextIndex].name:'Неизвестный ресурс';
   $('#goal-progress').textContent=value>=goal?'Можно открыть':`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
-  const now=Date.now()+clockOffset;$('#golden-button').hidden=needsName||goldenClaiming||cinematicActive||!(s.golden?.availableUntil>now&&s.golden?.nextAt<=now);
+  renderGolden(s,Date.now()+clockOffset);
   const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),resourceDiscovered(s,i),quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>s.balance>=u.price),connected]);
   if(force||stamp!==lastShopStamp){lastShopStamp=stamp;renderShop(s);}
   const confirmedAchievements=mode==='cloud'?(state.achievements||[]):(s.achievements||[]);
@@ -381,6 +403,7 @@ function refreshAccountStatus(){
   $('#retry-cloud').hidden=!cloud;$('#retry-cloud').disabled=Boolean(reconnectPromise)||busy||readOnlyTab;$('#retry-cloud').textContent=reconnectPromise?'Проверяем…':'Проверить соединение';
   $('#account-status').textContent=cloud?(connected?'Облачная учётная запись':connectionProblem?.title||'Проверяем облачный профиль'):'Сохранение в браузере';
   $('#account-details').textContent=cloud?`Вход при открытии игры выполняется автоматически. ${state.id?`Номер профиля: ${state.id.slice(0,8)}.`:''} ${connected?'Прогресс хранится на сервере.':connectionProblem?.message||'Проверяем сохранённый ключ и загружаем профиль с сервера.'}`:'В этом браузере игра продолжится с того же места. Для общего рейтинга подключите облако. Уже играли в облаке? Введите свой ключ входа ниже.';
+  if(readOnlyTab){$('#account-status').textContent='🔒 Только просмотр';$('#account-details').textContent='Лаборатория активна в другой вкладке. Вернитесь в неё или закройте её и обновите эту страницу. Здесь действия и сохранение отключены.';}
   $('#account-code').textContent=storageAvailable?'Секретный ключ сохранён в этом браузере.':'Браузер не сохранил ключ — обязательно скачайте его.';
   $('#profile-mode').textContent=cloud?'Скачайте ключ входа: он вернёт эту учётную запись на другом устройстве или после очистки браузера. Имя и эмодзи не заменяют ключ.':'Сделайте экспорт сохранения, чтобы не потерять локальную игру после очистки браузера. Облачная лаборатория начнётся с нуля — перед переходом игра предложит резервную копию.';
 }
@@ -390,11 +413,14 @@ function openProfile(){
   renderEmojiPicker();refreshAccountStatus();$('#profile-dialog').showModal();
 }
 $('#profile-button').addEventListener('click',openProfile);
+$('#save-status').addEventListener('click',()=>{if(readOnlyTab)showReadOnlyNotice();else openProfile();});
+$('#read-only-reload').addEventListener('click',()=>location.reload());
 $('#retry-cloud').addEventListener('click',()=>syncCloud(true));
 $('#emoji-options').addEventListener('click',event=>{const button=event.target.closest('[data-emoji]');if(!button)return;draftEmoji=profileEmoji(button.dataset.emoji);for(const item of $$('#emoji-options button')){const selected=item.dataset.emoji===draftEmoji;item.classList.toggle('selected',selected);item.setAttribute('aria-pressed',String(selected));}});
 $('#connect-cloud').addEventListener('click',async()=>{if(readOnlyTab||transitioning)return;$('#connect-cloud').disabled=true;try{await connectCloud();}finally{refreshAccountStatus();}});
 function validatedNickname(value){return nicknameValidationError(value)?null:normalizeNickname(value);}
 function openWelcome(){
+  if(readOnlyTab){showReadOnlyNotice();return;}
   if(!needsName)return;
   if(!$('#welcome-dialog').open){$('#welcome-dialog').showModal();$('#welcome-name').focus();}
 }
@@ -421,7 +447,7 @@ $('#welcome-restore-form').addEventListener('submit',async event=>{
   finally{button.disabled=false;}
 });
 $('#profile-form').addEventListener('submit',async e=>{
-  e.preventDefault();if(readOnlyTab){toast('Профиль изменяется в первой вкладке');return;}
+  e.preventDefault();if(readOnlyTab){showReadOnlyNotice();return;}
   const name=validatedNickname($('#nickname').value),errorBox=$('#profile-error'),submit=e.target.querySelector('[type="submit"]');
   errorBox.textContent='';if(!name){errorBox.textContent='Имя: от 2 до 24 символов, без ссылок и адресов';return;}
   submit.disabled=true;
@@ -449,11 +475,13 @@ $('#import-save').addEventListener('change',async e=>{const file=e.target.files[
 let prestigeSubmitting=false;
 function setCinematicUI(active){
   cinematicActive=active;$('#page-world').classList.toggle('cinematic-active',active);
+  $('#save-status').disabled=active;
   $('.main-nav').inert=active;$('#world-events-open').disabled=active;$('#world-resume-event').disabled=active;$('#profile-button').disabled=active;$('#music-button').disabled=active;
   $('#world-cinematic-skip').hidden=!active;$('#world-cinematic-mute').hidden=!active||!cinematicSound;
   if(!active)$('#world-cinematic-status').textContent='';
 }
 function openPrestige(){
+  if(readOnlyTab){showReadOnlyNotice();return;}
   showPage('world');$('#world-widget').scrollIntoView({block:'start',behavior:'instant'});
   const s=projected(),stats=getStats(s),next=prestigeAppearance(s.prestigeCount+1),missing=Math.max(0,PRESTIGE_PRICE-s.balance);
   $('#prestige-step-one').hidden=false;$('#prestige-step-two').hidden=true;

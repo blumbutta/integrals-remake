@@ -8,14 +8,19 @@
 .statistics-panel .lab-stats>div{padding:10px 9px}
 .statistics-panel .lab-stats span{font-size:13px;line-height:1.35;margin-bottom:5px}
 .statistics-panel .lab-stats strong{font-size:25px;line-height:1.2}
-#prestige-open.prestige-resource{display:flex;position:relative;min-height:104px;gap:10px;padding:14px 10px;overflow:hidden;border:1px solid #dec085;background:radial-gradient(ellipse at 4% 50%,#78543265,transparent 55%),linear-gradient(125deg,#201c30,#102337);box-shadow:inset 0 0 0 2px #e8c28024,0 0 14px #cdaa6017}
+#prestige-open.prestige-resource{display:grid;position:relative;grid-template-columns:88px minmax(0,1fr);grid-template-rows:minmax(94px,auto) auto;align-items:center;column-gap:12px;row-gap:14px;width:100%;min-width:0;min-height:194px;height:auto;padding:18px 15px 16px;overflow:hidden;border:1px solid #dec085;background:radial-gradient(ellipse at 4% 30%,#78543265,transparent 55%),linear-gradient(125deg,#201c30,#102337);box-shadow:inset 0 0 0 2px #e8c28024,0 0 14px #cdaa6017}
 #prestige-open.prestige-resource:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,transparent 20%,#ffdda40b 50%,transparent 80%)}
-#prestige-open .black-hole{width:56px;height:64px;flex:0 0 56px;margin:0;float:none;transform:none}
-#prestige-open .generator-info h3{color:#f4dfae;font-size:20px}
-#prestige-open .generator-info p{font-size:12px;line-height:1.5;color:#d3c6b3}
-#prestige-open .generator-info small{font-size:11px;color:#a5b9c4}
-#prestige-open .generator-meta{max-width:40%;min-width:0}
-#prestige-open .generator-meta strong{color:#d5c1a0;font-size:13px;white-space:normal;overflow-wrap:normal}
+/* Preserve a single 125×111 artwork coordinate system; scale the whole drawing. */
+#prestige-open>.black-hole-art{position:relative;display:block;grid-column:1;grid-row:1;width:88px;height:94px;min-width:0;margin:0;padding:0;float:none;isolation:isolate;pointer-events:none}
+#prestige-open>.black-hole-art>.black-hole{position:absolute;display:block;left:50%;top:50%;width:125px;height:111px;min-width:125px;max-width:none;margin:0;padding:0;float:none;transform:translate(-50%,-50%) scale(.69);transform-origin:center;isolation:isolate}
+#prestige-open .black-hole-art .black-hole>span{position:absolute;display:block;float:none;flex:none;margin:0;padding:0;min-width:0;max-width:none;pointer-events:none}
+#prestige-open>.generator-info{display:block;grid-column:2;grid-row:1;min-width:0;width:100%;margin:0;padding:0}
+#prestige-open .generator-info h3{color:#f4dfae;font-size:21px;line-height:1.25;overflow-wrap:normal;word-break:normal}
+#prestige-open .generator-info p{font-size:12px;line-height:1.5;color:#d3c6b3;margin-top:7px}
+#prestige-open .generator-info small{font-size:11px;line-height:1.5;color:#a5b9c4;margin-top:5px}
+#prestige-open>.generator-meta{display:flex;grid-column:1/-1;grid-row:2;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:7px;min-width:0;max-width:none;width:100%;margin:0;padding:12px 0 0;border-top:1px solid #e0c48c38}
+#prestige-open .generator-meta strong{display:block;flex:none;width:100%;max-width:none;color:#e9d29f;font:700 16px/1.4 Arial,sans-serif;white-space:normal;overflow-wrap:normal;text-align:left;font-variant-numeric:tabular-nums}
+#prestige-open .generator-meta>span{display:flex;align-items:center;flex:none;max-width:none;min-height:28px;padding:4px 9px;border:1px solid #d2b97d48;border-radius:3px;background:#f0d3940e;color:#e8d7b3;font:13px/1.5 Arial,sans-serif;text-align:left;overflow-wrap:normal}
 #prestige-open.affordable{border-color:#ffe4a0;box-shadow:inset 0 0 24px #e7ba5330,0 0 14px #e8c06b35}
 #prestige-open.affordable .generator-meta strong{color:#ffe3a3}
 #prestige-badge{font:12px Arial,sans-serif;color:#d5b8ff}
@@ -129,3 +134,26 @@ body[data-pattern="spectrum"]:before{background:conic-gradient(from 30deg at 50%
 .prestige-avatar[data-frame="3"]:before{border-style:dashed;border-width:2px}
 #profile-avatar{flex:0 0 38px;display:grid;place-items:center;width:38px;height:38px;border-radius:50%;font-size:25px;margin:5px 10px 5px 4px}
 @media(max-width:900px){#statistics-panel.statistics-dock .lab-stats{min-height:58px}#statistics-panel.statistics-dock .lab-stats>div{border-bottom:0}}
+
+/* Saving state is an explicit control, with a distinct view-only mode. */
+.topbar #save-status{display:flex;align-items:center;gap:8px;max-width:none;min-height:40px;padding:8px 10px;border:1px solid #a6bfd34a;border-radius:7px;background:#173445;color:#d9e8ec;font:600 13px/1.3 Arial,sans-serif;white-space:nowrap;cursor:pointer;text-align:left}
+.topbar #save-status i{width:7px;height:7px}
+.topbar #save-status:hover,.topbar #save-status:focus-visible{background:#254858;border-color:#d3e7ee}
+.topbar #save-status.readonly{color:#fff0c9;background:#61421a;border:2px solid #efb557;box-shadow:0 0 14px #e9a43820;font-size:14px}
+.topbar #save-status.readonly i{width:auto;height:auto;background:none;font-style:normal;font-size:16px;line-height:1}
+.topbar #save-status.warning{color:#ffe3a9;border-color:#d6a852;background:#4d391d}
+.topbar #save-status.error{color:#ffd0c5;border-color:#cb7965;background:#542a26}
+.read-only #connection-banner{background:#493819;color:#ffedc9;border-color:#d6a852;font-size:15px}
+.read-only #click-mode-hint{max-width:100%;padding:11px 14px;border:1px solid #d6a85288;background:#493819df;color:#ffedc9;font:600 14px/1.5 Arial,sans-serif}
+.read-only #integral-button{cursor:help;filter:saturate(.65)}
+.read-only-modal{max-width:560px;border-color:#d5aa65}
+.read-only-emblem{display:grid;place-items:center;width:64px;height:64px;margin-bottom:16px;border:1px solid #d5aa65;border-radius:18px;background:#69491f55;font-size:33px}
+.read-only-modal h2{font-size:32px;line-height:1.2}
+.read-only-modal p{font:16px/1.65 Arial,sans-serif}
+.read-only-instructions{padding:16px 18px;margin:22px 0;background:#f6be5720;border:1px solid #d5aa6570;border-radius:6px}
+.read-only-instructions strong{color:#ffe3a9;font:700 17px/1.4 Arial,sans-serif}
+.read-only-instructions p{margin:6px 0 0}
+.read-only-actions{display:flex;flex-wrap:wrap;gap:10px}
+.read-only-actions button{flex:1 1 200px;font-size:14px;min-height:46px}
+#golden-button>span{pointer-events:none}
+@media(max-width:600px){.topbar #save-status{font-size:12px;min-height:37px;max-width:190px;padding:6px 8px;white-space:normal;margin:0}.topbar #save-status.readonly{font-size:13px}.read-only-modal h2{font-size:28px}}
