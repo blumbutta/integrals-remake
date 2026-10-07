@@ -1,0 +1,119 @@
+import { startEvent, answerEvent, settleEvent } from './events.mjs';
+
+export const MAX_OFFLINE_MS = 12 * 60 * 60 * 1000;
+export const ACTIVE_GRACE_MS = 30_000;
+export const GOLDEN_WINDOW_MS = 15_000;
+export const GENERATORS = Object.freeze([
+  {id:'autoclick',name:'Автоклик',description:'Первый шаг к бесконечности.',basePrice:15,baseCps:0.25,icon:'⌁'},
+  {id:'abacus',name:'Школьник',description:'Начинает с простых задач и не сдаётся.',basePrice:125,baseCps:2,icon:'⠿'},
+  {id:'calculator',name:'Студент',description:'Интегрирует между парами и дедлайнами.',basePrice:1200,baseCps:14,icon:'▦'},
+  {id:'algorithm',name:'Преподаватель',description:'Один пример превращает в целую лекцию.',basePrice:12000,baseCps:85,icon:'⌘'},
+  {id:'neuron',name:'Компьютер',description:'Считает, пока лаборатория отдыхает.',basePrice:160000,baseCps:550,icon:'⟁'},
+  {id:'quantum',name:'Профессор',description:'Находит решение там, где кончаются учебники.',basePrice:2300000,baseCps:3500,icon:'⊙'},
+  {id:'singularity',name:'Искусственный интеллект',description:'Учится интегрировать быстрее самого себя.',basePrice:40000000,baseCps:23000,icon:'◉'},
+  {id:'dimension',name:'Портал',description:'Доставляет интегралы из другого измерения.',basePrice:700000000,baseCps:160000,icon:'◇'},
+  {id:'universe',name:'Машина времени',description:'Будущие вычисления уже готовы сегодня.',basePrice:14000000000,baseCps:1100000,icon:'✧'},
+  {id:'multiverse',name:'Глубокая мысль',description:'Ищет главный ответ среди бесконечных чисел.',basePrice:300000000000,baseCps:8000000,icon:'∞'},
+]);
+export const UPGRADES = Object.freeze([
+  {id:'click-1',name:'Острый карандаш',description:'Сила клика ×2.',price:100,target:'click',multiplier:2,requirement:{type:'clicks',amount:25}},
+  {id:'click-2',name:'Быстрая мысль',description:'Сила клика ×2.',price:1500,target:'click',multiplier:2,requirement:{type:'clicks',amount:150}},
+  {id:'click-3',name:'Поток сознания',description:'Сила клика ×2.',price:25000,target:'click',multiplier:2,requirement:{type:'clicks',amount:500}},
+  {id:'click-4',name:'Чистая математика',description:'Сила клика ×2.',price:1000000,target:'click',multiplier:2,requirement:{type:'clicks',amount:2000}},
+  ...GENERATORS.flatMap((g,i)=>[
+    {id:g.id+'-1',name:['Двойной импульс','Пять с плюсом','Красный диплом','Новый учебный план','Разгон процессора','Фундаментальный труд','Самообучение','Стабильный переход','Петля времени','Ответ 42'][i],description:g.name+': производство ×2.',price:g.basePrice*12,target:g.id,multiplier:2,requirement:{type:'generator',itemId:g.id,amount:10}},
+    {id:g.id+'-2',name:g.name+' · совершенство',description:g.name+': производство ещё ×2.',price:g.basePrice*120,target:g.id,multiplier:2,requirement:{type:'generator',itemId:g.id,amount:25}},
+  ]),
+]);
+
+export class EconomyError extends Error {
+  constructor(code,message){super(message);this.name='EconomyError';this.code=code;}
+}
+const fail=(code,message)=>{throw new EconomyError(code,message);};
+const bounded=value=>Math.min(1e250,Math.max(0,value));
+const schedule=(now,random=Math.random)=>now+90_000+Math.floor(Math.max(0,Math.min(0.99999999,random()))*90_001);
+export function createState(now=Date.now()) {
+  return {version:1,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
+}
+export function priceFor(itemId,owned,amount=1) {
+  const g=typeof itemId==='number'?GENERATORS[itemId]:GENERATORS.find(x=>x.id===itemId);
+  if(!g||!Number.isInteger(owned)||owned<0||!Number.isInteger(amount)||amount<1||amount>100)return Infinity;
+  return Math.ceil(g.basePrice*Math.pow(1.15,owned)*(Math.pow(1.15,amount)-1)/0.15-1e-9);
+}
+export function upgradeAvailable(state,u){
+  if(state.upgrades.includes(u.id))return false;
+  return u.requirement.type==='clicks'?state.clicks>=u.requirement.amount:state.generators[GENERATORS.findIndex(g=>g.id===u.requirement.itemId)]>=u.requirement.amount;
+}
+export function getStats(state) {
+  const multiplier=1+state.prestige*0.1;
+  let clickPower=1,cps=0;
+  for(const u of UPGRADES)if(u.target==='click'&&state.upgrades.includes(u.id))clickPower*=u.multiplier;
+  GENERATORS.forEach((g,i)=>{let rate=g.baseCps*state.generators[i];for(const u of UPGRADES)if(u.target===g.id&&state.upgrades.includes(u.id))rate*=u.multiplier;cps+=rate;});
+  return {cps:bounded(cps*multiplier),clickPower:bounded(clickPower*multiplier),multiplier,prestigeGain:Math.floor(Math.sqrt(state.runEarned/1_000_000))};
+}
+function credit(state,value){const safe=bounded(value);state.balance=bounded(state.balance+safe);state.totalEarned=bounded(state.totalEarned+safe);state.runEarned=bounded(state.runEarned+safe);return safe;}
+function collectAchievements(state){
+  const owned=new Set(state.achievements||[]),generatorCount=state.generators.reduce((a,b)=>a+b,0);
+  const checks={first:state.totalEarned>=1,click100:state.clicks>=100,auto:generatorCount>=1,hundred:state.totalEarned>=1000,team:generatorCount>=25,research:state.upgrades.length>=3,speed:getStats(state).cps>=100,million:state.totalEarned>=1e6,click1000:state.clicks>=1000,prestige:state.prestigeCount>=1,billion:state.totalEarned>=1e9,all:state.generators.every(n=>n>0)};
+  for(const [id,earned] of Object.entries(checks))if(earned)owned.add(id);
+  state.achievements=[...owned];
+}
+function finished(state,result){collectAchievements(state);return result;}
+export function settle(state,now=Date.now()) {
+  if(!Number.isFinite(now))fail('invalid_time','Некорректное время.');
+  const until=Math.max(state.lastSettled,now),from=state.lastSettled;
+  const activeEnd=state.lastSeen+ACTIVE_GRACE_MS;
+  const activeMs=Math.max(0,Math.min(until,activeEnd)-from);
+  const offlineMs=Math.max(0,Math.min(until,activeEnd+MAX_OFFLINE_MS)-Math.max(from,activeEnd));
+  const cps=getStats(state).cps;
+  const offlineEarned=cps*offlineMs/1000*0.5;
+  const earned=credit(state,cps*activeMs/1000+offlineEarned);
+  state.lastSettled=until;state.serverTime=until;state.offlineEarned=offlineEarned;
+  if(now>=state.golden.nextAt){
+    if(now<=state.golden.nextAt+GOLDEN_WINDOW_MS)state.golden.availableUntil=state.golden.nextAt+GOLDEN_WINDOW_MS;
+    else{state.golden.availableUntil=0;state.golden.nextAt=schedule(now);}
+  }
+  settleEvent(state,now);collectAchievements(state);return {earned,offlineEarned};
+}
+export function applyAction(state,action,now=Date.now()) {
+  if(!action||typeof action!=='object'||Array.isArray(action))fail('invalid_action','Некорректное действие.');
+  settle(state,now);
+  if(action.type==='event_start'){
+    startEvent(state,action.itemId,getStats(state),now);return finished(state,{type:'event_start'});
+  }
+  if(action.type==='event_answer'){
+    const result=answerEvent(state,action.itemId,action.answers,now);return finished(state,{type:'event_answer',...result});
+  }
+  if(action.type==='click'){
+    const amount=action.amount??1;
+    if(!Number.isInteger(amount)||amount<1||amount>24)fail('invalid_amount','За один запрос допустимо от 1 до 24 кликов.');
+    const reward=credit(state,getStats(state).clickPower*amount);state.clicks+=amount;return finished(state,{type:'click',reward,count:amount});
+  }
+  if(action.type==='buy'){
+    const index=GENERATORS.findIndex(g=>g.id===action.itemId),amount=action.amount??1;
+    if(index<0)fail('unknown_item','Такого генератора нет.');
+    if(!Number.isInteger(amount)||amount<1||amount>100)fail('invalid_amount','Можно купить от 1 до 100 генераторов.');
+    const cost=priceFor(action.itemId,state.generators[index],amount);
+    if(!Number.isFinite(cost)||state.balance<cost)fail('insufficient_funds','Недостаточно интегралов.');
+    state.balance=Math.max(0,state.balance-cost);state.generators[index]+=amount;return finished(state,{type:'buy',count:amount});
+  }
+  if(action.type==='upgrade'){
+    const upgrade=UPGRADES.find(u=>u.id===action.itemId);
+    if(!upgrade)fail('unknown_item','Такого улучшения нет.');
+    if(!upgradeAvailable(state,upgrade))fail('upgrade_locked','Это улучшение пока недоступно или уже куплено.');
+    if(state.balance<upgrade.price)fail('insufficient_funds','Недостаточно интегралов.');
+    state.balance-=upgrade.price;state.upgrades.push(upgrade.id);return finished(state,{type:'upgrade'});
+  }
+  if(action.type==='prestige'){
+    if(state.activeEvent)fail('event_active','Заверши испытание перед перерождением.');
+    const gain=getStats(state).prestigeGain;
+    if(gain<1)fail('prestige_locked','Для первого престижа нужен миллион интегралов за цикл.');
+    state.prestige+=gain;state.prestigeCount++;state.balance=0;state.runEarned=0;state.generators=GENERATORS.map(()=>0);state.upgrades=[];state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'prestige',prestigeGain:gain});
+  }
+  if(action.type==='golden'){
+    if(state.golden.availableUntil<=0||now>state.golden.availableUntil||now<state.golden.nextAt)fail('golden_unavailable','Золотой интеграл сейчас недоступен.');
+    const stats=getStats(state),reward=credit(state,Math.max(stats.clickPower*25,stats.cps*60));
+    state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'golden',reward});
+  }
+  fail('unknown_action','Неизвестное действие.');
+}
