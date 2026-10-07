@@ -301,9 +301,6 @@ function render(force=false){
   $('#profile-name').textContent=nickname||'Ваш профиль';renderProfileFrame(s);if($('#profile-dialog').open)refreshAccountStatus();$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#upgrade-count').textContent=s.upgrades.length;
   $$('#statistics-panel strong[id]').forEach(value=>{value.textContent=value.textContent.replace(/\u00a0/g,' ');value.classList.toggle('stat-long',value.textContent.length>16);value.title=value.textContent;});
   $('#era-label').textContent=s.totalEarned>=1e9?'ЭПОХА IV · ЗА ГРАНЬЮ БЕСКОНЕЧНОСТИ':s.totalEarned>=1e6?'ЭПОХА III · ЕДИНАЯ ТЕОРИЯ':s.totalEarned>=1000?'ЭПОХА II · БОЛЬШИЕ ОТКРЫТИЯ':'ЭПОХА I · ПЕРВЫЙ ПРИНЦИП';
-  const nextIndex=s.generators.findIndex(v=>v===0),goal=s.prestigeCount>=MAX_PRESTIGE||nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance,finalCycle=s.prestigeCount>=MAX_PRESTIGE;
-  $('#goal-text').textContent=finalCycle?'Завершите большой цикл — откройте мир за гранью бесконечности.':nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':s.totalEarned>=GENERATORS[nextIndex].basePrice?GENERATORS[nextIndex].name:'Неизвестный ресурс';
-  $('#goal-progress').textContent=value>=goal?(finalCycle?'Можно завершить цикл':'Можно открыть'):`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
   renderGolden(s,Date.now()+clockOffset);
   const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),resourceDiscovered(s,i),quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>{const info=researchInfo(s,u.id);return info?[info.unlocked,info.affordable]:null;}),connected]);
   if(force||stamp!==lastShopStamp){lastShopStamp=stamp;renderShop(s);}
