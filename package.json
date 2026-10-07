@@ -9,6 +9,6 @@
   "scripts": {
     "dev": "node server/dev.mjs",
     "test": "node --test server/*.test.mjs",
-    "check": "node --check achievement-art.mjs && node --check prestige-audio.mjs && node --check format.mjs && node --check effects.mjs && node --check world.mjs && node --check research-art.mjs && node --check shared/achievements.mjs && node --check app.mjs && node --check music.mjs && node --check shared/economy.mjs && node --check shared/events.mjs"
+    "check": "node --check achievement-art.mjs && node --check prestige-audio.mjs && node --check format.mjs && node --check effects.mjs && node --check world.mjs && node --check research-art.mjs && node --check resource-info.mjs && node --check shared/profile.mjs && node --check shared/achievements.mjs && node --check app.mjs && node --check music.mjs && node --check shared/economy.mjs && node --check shared/events.mjs"
   }
 }

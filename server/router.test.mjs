@@ -5,8 +5,10 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { createIntegralsHandler } from './router.mjs';
-import { PRESTIGE_PRICE, GENERATORS } from '../shared/economy.mjs';
+import { PRESTIGE_PRICE, GENERATORS, createState } from '../shared/economy.mjs';
+import { PROFILE_EMOJIS, DEFAULT_EMOJI, isProfileEmoji, profileEmoji } from '../shared/profile.mjs';
 
 async function fixture(options={}){
   const dir=mkdtempSync(join(tmpdir(),'integrals-test-'));let time=1_000_000;
@@ -40,11 +42,11 @@ test('profile creation, durable recovery after reopen, hash-only storage and pub
   try{
     const created=await f.request(p+'/players','POST',{nickname:'Интегратор'});
     assert.equal(created.status,201);token=created.data.token;publicId=created.data.player.id;
-    assert.equal(created.data.player.listed,true);assert.equal(created.data.player.generators.length,GENERATORS.length);
+    assert.equal(created.data.player.listed,true);assert.equal(created.data.player.emoji,DEFAULT_EMOJI);assert.equal(created.data.player.generators.length,GENERATORS.length);
     const action=await f.request(p+'/action','POST',{id:actionId(1),type:'click',amount:20},token);
     assert.equal(action.data.player.totalEarned,20);
     const rating=await f.request(p+'/leaderboard');
-    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['id','nickname','prestige','rank','totalEarned']);
+    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['balance','emoji','id','nickname','prestige','rank','totalEarned']);
     assert.equal(rating.data.entries[0].id,publicId);assert.ok(!JSON.stringify(rating.data).includes(token));
     const hide=await f.request(p+'/profile','PATCH',{listed:false},token);assert.equal(hide.data.player.listed,false);
     assert.equal((await f.request(p+'/leaderboard')).data.entries.length,0);
@@ -89,6 +91,86 @@ test('profile fields are validated and cannot modify score or inject markup',asy
     const response=await f.request(p+'/profile','PATCH',{nickname:'Новая теорема',listed:false},token);
     assert.equal(response.status,200);assert.equal(response.data.player.nickname,'Новая теорема');assert.equal(response.data.player.totalEarned,0);
   }finally{await f.close();}
+});
+test('curated emoji choices validate on create and update, persist on reads and cannot inject profile fields',async()=>{
+  assert.equal(new Set(PROFILE_EMOJIS).size,PROFILE_EMOJIS.length);assert.ok(PROFILE_EMOJIS.includes(DEFAULT_EMOJI));
+  assert.equal(profileEmoji(undefined),DEFAULT_EMOJI);assert.equal(profileEmoji('<script>'),DEFAULT_EMOJI);
+  const f=await fixture();try{
+    const created=await f.request(p+'/players','POST',{nickname:'Квант',emoji:'🧪'});
+    assert.equal(created.status,201);assert.equal(created.data.player.emoji,'🧪');const token=created.data.token;
+    for(const choice of PROFILE_EMOJIS){
+      assert.equal(isProfileEmoji(choice),true);
+      const updated=await f.request(p+'/profile','PATCH',{emoji:choice},token);
+      assert.equal(updated.status,200);assert.equal(updated.data.player.emoji,choice);
+      assert.equal((await f.request(p+'/state','GET',undefined,token)).data.player.emoji,choice);
+    }
+    const invalid=['','🧪🧪','<img src=x>','plain text',null,12,{},['🧪'],'🧪 '];
+    for(const value of invalid){
+      assert.equal(isProfileEmoji(value),false);
+      const create=await f.request(p+'/players','POST',{emoji:value});assert.equal(create.status,400);assert.equal(create.data.error.code,'invalid_emoji');
+      const patch=await f.request(p+'/profile','PATCH',{emoji:value,nickname:'Не сохранять'},token);assert.equal(patch.status,400);assert.equal(patch.data.error.code,'invalid_emoji');
+    }
+    const renamed=await f.request(p+'/profile','PATCH',{nickname:'Новая теорема'},token);
+    assert.equal(renamed.data.player.emoji,PROFILE_EMOJIS.at(-1));assert.equal(renamed.data.player.nickname,'Новая теорема');
+    assert.equal((await f.request(p+'/profile','PATCH',{emoji:DEFAULT_EMOJI,balance:10000},token)).status,400);
+    const db=new DatabaseSync(f.dbPath);const rows=db.prepare('SELECT nickname,emoji,total_earned FROM integrals_players').all();db.close();
+    assert.deepEqual(rows.map(row=>({...row})),[{nickname:'Новая теорема',emoji:PROFILE_EMOJIS.at(-1),total_earned:0}]);
+  }finally{await f.close();}
+});
+test('leaderboard reports separate current balance, lifetime score, prestige, emoji and rank without private state',async()=>{
+  const f=await fixture();try{
+    const first=(await f.request(p+'/players','POST',{nickname:'Первый',emoji:'🚀'})).data;
+    const second=(await f.request(p+'/players','POST',{nickname:'Второй',emoji:'🤖'})).data;
+    await f.request(p+'/action','POST',{id:actionId(60),type:'click',amount:20},first.token);
+    await f.request(p+'/action','POST',{id:actionId(61),type:'buy',itemId:'autoclick'},first.token);
+    await f.request(p+'/action','POST',{id:actionId(62),type:'click',amount:19},second.token);
+    const db=new DatabaseSync(f.dbPath),row=db.prepare('SELECT * FROM integrals_players WHERE public_id=?').get(second.player.id),state=JSON.parse(row.state);
+    state.prestige=7;db.prepare('UPDATE integrals_players SET state=?,prestige=? WHERE id=?').run(JSON.stringify(state),7,row.id);db.close();
+    const rating=(await f.request(p+'/leaderboard')).data;
+    assert.deepEqual(rating.entries,[
+      {id:first.player.id,nickname:'Первый',emoji:'🚀',totalEarned:20,balance:5,prestige:0,rank:1},
+      {id:second.player.id,nickname:'Второй',emoji:'🤖',totalEarned:19,balance:19,prestige:7,rank:2},
+    ]);
+    assert.ok(!JSON.stringify(rating).includes(first.token));assert.ok(!JSON.stringify(rating).includes(second.token));
+    for(const entry of rating.entries)assert.deepEqual(Object.keys(entry).sort(),['balance','emoji','id','nickname','prestige','rank','totalEarned']);
+    await f.request(p+'/profile','PATCH',{listed:false},first.token);
+    const hidden=(await f.request(p+'/leaderboard')).data.entries;assert.equal(hidden.length,1);assert.equal(hidden[0].id,second.player.id);assert.equal(hidden[0].rank,1);
+  }finally{await f.close();}
+});
+test('old database receives an additive emoji migration and recovery, receipts and selected emoji survive restart',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'integrals-legacy-')),dbPath=join(dir,'old.sqlite'),t=1_000_000;
+  const token='ir_'+'b'.repeat(43),tokenHash=createHash('sha256').update(token).digest('hex'),publicId='b1b4ec24-4ca0-4a52-aac3-727940ae9556';
+  const legacy=createState(t);legacy.balance=73.5;legacy.totalEarned=12345;legacy.runEarned=345;legacy.prestige=7;legacy.prestigeCount=2;legacy.clicks=5;
+  const replay={id:actionId(70),type:'click',amount:5};
+  const db=new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE integrals_players (
+    id INTEGER PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
+    nickname TEXT NOT NULL, listed INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL,
+    total_earned REAL NOT NULL DEFAULT 0, prestige REAL NOT NULL DEFAULT 0,
+    click_tokens REAL NOT NULL DEFAULT 24, click_refill INTEGER NOT NULL,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  ); CREATE TABLE integrals_actions (
+    player_id INTEGER NOT NULL REFERENCES integrals_players(id), action_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(player_id,action_id)
+  );`);
+  db.prepare('INSERT INTO integrals_players(id,public_id,token_hash,nickname,state,total_earned,prestige,click_refill,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(42,publicId,tokenHash,'Прежний профиль',JSON.stringify(legacy),legacy.totalEarned,legacy.prestige,t,t,t);
+  db.prepare('INSERT INTO integrals_actions(player_id,action_id,fingerprint,created_at) VALUES(?,?,?,?)').run(42,replay.id,createHash('sha256').update(JSON.stringify({type:'click',amount:5})).digest('hex'),t);
+  db.close();let f;
+  try{
+    f=await fixture({dbPath});
+    const migrated=new DatabaseSync(dbPath),row=migrated.prepare('SELECT * FROM integrals_players').get();
+    assert.equal(row.id,42);assert.equal(row.public_id,publicId);assert.equal(row.token_hash,tokenHash);assert.equal(row.emoji,DEFAULT_EMOJI);assert.equal(row.state,JSON.stringify(legacy));
+    assert.equal(migrated.prepare('SELECT COUNT(*) AS count FROM integrals_actions').get().count,1);migrated.close();
+    const loaded=await f.request(p+'/state','GET',undefined,token);assert.equal(loaded.status,200);assert.equal(loaded.data.player.emoji,DEFAULT_EMOJI);assert.equal(loaded.data.player.balance,73.5);
+    const repeated=await f.request(p+'/action','POST',replay,token);assert.equal(repeated.status,200);assert.equal(repeated.data.player.clicks,5);
+    assert.equal((await f.request(p+'/profile','PATCH',{emoji:'⚛️'},token)).data.player.emoji,'⚛️');
+    await f.close();f=await fixture({dbPath});
+    const reopened=(await f.request(p+'/state','GET',undefined,token)).data.player;
+    assert.equal(reopened.emoji,'⚛️');assert.equal(reopened.id,publicId);assert.equal(reopened.nickname,'Прежний профиль');assert.equal(reopened.totalEarned,12345);assert.equal(reopened.balance,73.5);assert.equal(reopened.prestige,7);
+    const rating=(await f.request(p+'/leaderboard')).data;assert.deepEqual(rating.entries,[{id:publicId,nickname:'Прежний профиль',emoji:'⚛️',totalEarned:12345,balance:73.5,prestige:7,rank:1}]);
+    assert.ok(!JSON.stringify(rating).includes(token));assert.ok(!JSON.stringify(rating).includes(tokenHash));
+    const persisted=new DatabaseSync(dbPath);assert.equal(persisted.prepare('PRAGMA table_info(integrals_players)').all().filter(column=>column.name==='emoji').length,1);assert.equal(persisted.prepare('SELECT token_hash FROM integrals_players WHERE id=42').get().token_hash,tokenHash);persisted.close();
+  }finally{if(f?.server.listening)await f.close();rmSync(dir,{recursive:true,force:true});}
 });
 test('missing configured storage fails closed without intercepting other games',async()=>{
   const f=await fixture({dbPath:''});try{

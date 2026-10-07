@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
 import { GENERATORS, UPGRADES, createState, settle, applyAction, getStats, priceFor, upgradeAvailable, EconomyError } from '../shared/economy.mjs';
 import { getPublicEvent, EventError } from '../shared/events.mjs';
+import { DEFAULT_EMOJI, isProfileEmoji, profileEmoji } from '../shared/profile.mjs';
 
 const PREFIX='/integrals-api';
 const TOKEN_RE=/^ir_[A-Za-z0-9_-]{43}$/;
@@ -20,6 +21,11 @@ function nickname(value,fallback){
   if([...name].length<2||[...name].length>24||/[\p{Cc}\p{Cf}<>@/\\]/u.test(name))reject(400,'invalid_nickname','Имя: от 2 до 24 символов, без ссылок и адресов.');
   return name;
 }
+function emoji(value,fallback=DEFAULT_EMOJI){
+  if(value===undefined)return profileEmoji(fallback);
+  if(!isProfileEmoji(value))reject(400,'invalid_emoji','Выбери эмодзи из предложенного списка.');
+  return value;
+}
 async function bodyJSON(req){
   if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||''))reject(415,'json_required','Нужен JSON-запрос.');
   if(Number(req.headers['content-length']||0)>2048)reject(413,'body_too_large','Запрос слишком большой.');
@@ -35,7 +41,7 @@ async function bodyJSON(req){
   });
 }
 function publicPlayer(row,state,now){
-  return {revision:state.revision||0,id:row.public_id,nickname:row.nickname,listed:!!row.listed,serverTime:now,lastSeen:state.lastSeen,lastSettled:state.lastSettled,balance:state.balance,totalEarned:state.totalEarned,runEarned:state.runEarned,clicks:state.clicks,generators:state.generators,upgrades:state.upgrades,achievements:state.achievements||[],achievementRecords:state.achievementRecords||{},activeEvent:getPublicEvent(state.activeEvent),eventCooldowns:state.eventCooldowns||{},eventStats:state.eventStats||{wins:0,losses:0},lastEventResult:state.lastEventResult||null,prestige:state.prestige,prestigeCount:state.prestigeCount,golden:state.golden,offlineEarned:state.offlineEarned,stats:getStats(state),generatorPrices:GENERATORS.map((g,i)=>priceFor(g.id,state.generators[i])),availableUpgrades:UPGRADES.filter(u=>upgradeAvailable(state,u)).map(u=>u.id)};
+  return {revision:state.revision||0,id:row.public_id,nickname:row.nickname,emoji:profileEmoji(row.emoji),listed:!!row.listed,serverTime:now,lastSeen:state.lastSeen,lastSettled:state.lastSettled,balance:state.balance,totalEarned:state.totalEarned,runEarned:state.runEarned,clicks:state.clicks,generators:state.generators,upgrades:state.upgrades,achievements:state.achievements||[],achievementRecords:state.achievementRecords||{},activeEvent:getPublicEvent(state.activeEvent),eventCooldowns:state.eventCooldowns||{},eventStats:state.eventStats||{wins:0,losses:0},lastEventResult:state.lastEventResult||null,prestige:state.prestige,prestigeCount:state.prestigeCount,golden:state.golden,offlineEarned:state.offlineEarned,stats:getStats(state),generatorPrices:GENERATORS.map((g,i)=>priceFor(g.id,state.generators[i])),availableUpgrades:UPGRADES.filter(u=>upgradeAvailable(state,u)).map(u=>u.id)};
 }
 const DEFAULT_ORIGIN_ALLOWED=origin=>!origin||origin==='https://blumbutta.github.io'||/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
@@ -52,7 +58,7 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
       db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
         CREATE TABLE IF NOT EXISTS integrals_players (
           id INTEGER PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
-          nickname TEXT NOT NULL, listed INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL,
+          nickname TEXT NOT NULL, emoji TEXT NOT NULL DEFAULT '${DEFAULT_EMOJI}', listed INTEGER NOT NULL DEFAULT 1, state TEXT NOT NULL,
           total_earned REAL NOT NULL DEFAULT 0, prestige REAL NOT NULL DEFAULT 0,
           click_tokens REAL NOT NULL DEFAULT 24, click_refill INTEGER NOT NULL,
           created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
@@ -64,6 +70,11 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
         );
         CREATE INDEX IF NOT EXISTS integrals_ranking ON integrals_players(listed,total_earned DESC);
         CREATE INDEX IF NOT EXISTS integrals_action_expiry ON integrals_actions(created_at);`);
+      // Add one column in place. Existing profile IDs, recovery hashes and receipts survive.
+      tx(()=>{
+        const columns=db.prepare('PRAGMA table_info(integrals_players)').all();
+        if(!columns.some(column=>column.name==='emoji'))db.exec(`ALTER TABLE integrals_players ADD COLUMN emoji TEXT NOT NULL DEFAULT '${DEFAULT_EMOJI}'`);
+      });
     }catch{
       try{db?.close();}catch{}db=null;
       // No path, SQL, request body or credentials are emitted to logs.
@@ -94,7 +105,7 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
   }
   function tx(fn){db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}}
   function save(row,state,t){
-    db.prepare('UPDATE integrals_players SET state=?, nickname=?, listed=?, total_earned=?, prestige=?, click_tokens=?, click_refill=?, updated_at=? WHERE id=?').run(JSON.stringify(state),row.nickname,row.listed,state.totalEarned,state.prestige,row.click_tokens,row.click_refill,t,row.id);
+    db.prepare('UPDATE integrals_players SET state=?, nickname=?, emoji=?, listed=?, total_earned=?, prestige=?, click_tokens=?, click_refill=?, updated_at=? WHERE id=?').run(JSON.stringify(state),row.nickname,profileEmoji(row.emoji),row.listed,state.totalEarned,state.prestige,row.click_tokens,row.click_refill,t,row.id);
   }
   function playerOperation(req,operation){
     return tx(()=>{
@@ -119,11 +130,11 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
     if(path==='/health'&&req.method==='GET'){json(res,200,{ok:true,game:'integrals-remake',storage:'persistent',rankingPeriods:['all']});return;}
     if(path==='/players'&&req.method==='POST'){
       limit(req,'create');const body=await bodyJSON(req);
-      if(Object.keys(body).some(k=>k!=='nickname'))reject(400,'invalid_fields','Передано неизвестное поле.');
+      if(Object.keys(body).some(k=>!['nickname','emoji'].includes(k)))reject(400,'invalid_fields','Передано неизвестное поле.');
       const t=now(),token='ir_'+randomBytes(32).toString('base64url'),publicId=randomUUID();
-      const name=nickname(body.nickname,'Исследователь '+publicId.slice(0,6)),state=createState(t);
+      const name=nickname(body.nickname,'Исследователь '+publicId.slice(0,6)),selectedEmoji=emoji(body.emoji),state=createState(t);
       const row=tx(()=>{
-        const result=db.prepare('INSERT INTO integrals_players (public_id,token_hash,nickname,state,click_refill,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(publicId,hash(token),name,JSON.stringify(state),t,t,t);
+        const result=db.prepare('INSERT INTO integrals_players (public_id,token_hash,nickname,emoji,state,click_refill,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(publicId,hash(token),name,selectedEmoji,JSON.stringify(state),t,t,t);
         return db.prepare('SELECT * FROM integrals_players WHERE id=?').get(result.lastInsertRowid);
       });
       json(res,201,{token,player:publicPlayer(row,state,t)});return;
@@ -155,14 +166,14 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
     }
     if(path==='/profile'&&req.method==='PATCH'){
       const body=await bodyJSON(req);
-      if(Object.keys(body).some(k=>!['nickname','listed'].includes(k)))reject(400,'invalid_fields','Передано неизвестное поле.');
+      if(Object.keys(body).some(k=>!['nickname','listed','emoji'].includes(k)))reject(400,'invalid_fields','Передано неизвестное поле.');
       if(body.listed!==undefined&&typeof body.listed!=='boolean')reject(400,'invalid_listed','Настройка рейтинга должна быть true или false.');
-      json(res,200,playerOperation(req,row=>{row.nickname=nickname(body.nickname,row.nickname);if(body.listed!==undefined)row.listed=body.listed?1:0;}));return;
+      json(res,200,playerOperation(req,row=>{row.nickname=nickname(body.nickname,row.nickname);row.emoji=emoji(body.emoji,row.emoji);if(body.listed!==undefined)row.listed=body.listed?1:0;}));return;
     }
     if(path==='/leaderboard'&&req.method==='GET'){
       const period=search.get('period')||'all';
       if(period!=='all')reject(400,'unsupported_period','Пока доступен общий рейтинг за всё время.');
-      const entries=db.prepare('SELECT public_id AS id,nickname,total_earned AS totalEarned,prestige FROM integrals_players WHERE listed=1 ORDER BY total_earned DESC,created_at ASC,id ASC LIMIT 100').all().map((row,i)=>({...row,rank:i+1}));
+      const entries=db.prepare("SELECT public_id AS id,nickname,emoji,total_earned AS totalEarned,json_extract(state,'$.balance') AS balance,prestige FROM integrals_players WHERE listed=1 ORDER BY total_earned DESC,created_at ASC,id ASC LIMIT 100").all().map((row,i)=>({...row,emoji:profileEmoji(row.emoji),rank:i+1}));
       json(res,200,{period:'all',entries,updatedAt:now()});return;
     }
     if(['/health','/players','/state','/action','/profile','/leaderboard'].includes(path))reject(405,'method_not_allowed','Этот метод не поддерживается.');
