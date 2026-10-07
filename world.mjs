@@ -39,7 +39,7 @@ const smooth=n=>{n=clamp(n,0,1);return n*n*(3-2*n);};
 export function createLabWorld(canvas,{onInspect,onLocation}={}){
   const ctx=canvas?.getContext?.('2d',{alpha:false});
   if(!ctx)return {update(){},burst(){},setPaused(){},get paused(){return true;},resize(){},destroy(){},playPrestige(){return Promise.resolve();},finishPrestige(){}};
-  let destroyed=false,manualPaused=false,inView=true,raf=0,lastFrame=0,time=0;
+  let destroyed=false,manualPaused=false,inView=true,raf=0,lastFrame=0,time=0,lastVisibilitySync=-Infinity;
   let width=W,height=H,dpr=1,scale=1,ox=0,oy=0,flash=0,flashTimer=0,lastInspection=-Infinity;
   let view={left:0,top:0,right:W,bottom:H};
   let actors=[],particles=[],waves=[],hitAreas=[],cinema=null;
@@ -349,7 +349,14 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     if(!cinema)return;const previous=cinema;cinema=null;clearTimeout(previous.timer);shown=latest;rebuildActors();particles=[];waves=[];flash=0;if(!destroyed){draw();schedule();}previous.resolve();
   }
   function playPrestige({state,durationMs=6500,hue}={}){
-    finishPrestige();if(destroyed||document.hidden||manualPaused||!inView){if(!destroyed)applyLatest();return Promise.resolve();}
+    finishPrestige();
+    if(!destroyed){
+      // A tab switch is synchronous; its IntersectionObserver notification is not.
+      const rect=canvas.getBoundingClientRect(),viewportWidth=window.innerWidth||document.documentElement?.clientWidth||0,viewportHeight=window.innerHeight||document.documentElement?.clientHeight||0;
+      inView=rect.width>0&&rect.height>0&&rect.left+rect.width>0&&rect.top+rect.height>0&&rect.left<viewportWidth&&rect.top<viewportHeight;
+      lastVisibilitySync=performance.now();
+    }
+    if(destroyed||document.hidden||manualPaused||!inView){if(!destroyed)applyLatest();return Promise.resolve();}
     const old=state?snapshot(state,{hue:Number.isFinite(Number(hue))?Number(hue):shown.hue,accent:shown.accent}):shown;shown=old;rebuildActors();waves=[];
     const duration=reduced?420:clamp(Number(durationMs)||6500,1200,15000);
     if(!reduced){
@@ -373,7 +380,10 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function pagehide(){finishPrestige();if(raf){cancelAnimationFrame(raf);raf=0;}}
   function motionChanged(event){reduced=event.matches;if(reduced){particles=[];waves=[];finishPrestige();}schedule();draw();}
   const ro=typeof ResizeObserver==='function'?new ResizeObserver(resize):null;
-  const io=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{inView=!!entries[0]?.isIntersecting;if(!inView&&cinema)finishPrestige();schedule();if(inView)draw();},{rootMargin:'40px'}):null;
+  const io=typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{
+    const entry=entries.at(-1);if(!entry||Number.isFinite(entry.time)&&entry.time<lastVisibilitySync)return;
+    inView=!!entry.isIntersecting;if(!inView&&cinema)finishPrestige();schedule();if(inView)draw();
+  },{rootMargin:'40px'}):null;
   ro?.observe(canvas);io?.observe(canvas);if(!ro)window.addEventListener('resize',resize);
   canvas.addEventListener('click',pointer);document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',pagehide);media?.addEventListener?.('change',motionChanged);resize();
   return {

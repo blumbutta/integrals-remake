@@ -482,7 +482,6 @@ function setCinematicUI(active){
 }
 function openPrestige(){
   if(readOnlyTab){showReadOnlyNotice();return;}
-  showPage('world');$('#world-widget').scrollIntoView({block:'start',behavior:'instant'});
   const s=projected(),stats=getStats(s),next=prestigeAppearance(s.prestigeCount+1),missing=Math.max(0,PRESTIGE_PRICE-s.balance);
   $('#prestige-step-one').hidden=false;$('#prestige-step-two').hidden=true;
   $('#prestige-audio-enabled').checked=cinematicSound;
@@ -504,6 +503,7 @@ $('#prestige-final-confirm').addEventListener('click',async()=>{
   try{
     succeeded=await act({type:'prestige'});if(!succeeded)return;
     selectedCosmetic='prestige';prestigePage=Math.floor((state.prestigeCount-1)/8);save();$('#prestige-dialog').close();
+    showPage('world');$('#world-widget').scrollIntoView({block:'start',behavior:'instant'});
     music.pause();updateMusic();
     const duration=matchMedia('(prefers-reduced-motion: reduce)').matches?450:6500;
     $('#world-cinematic-status').textContent='В небе открывается чёрная дыра. Мир переходит в новую эпоху…';

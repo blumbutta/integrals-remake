@@ -9,8 +9,8 @@ function browser(t){
   const original=new Map(names.map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
   const media=new EventTarget();media.matches=false;
   const document=new EventTarget();document.hidden=false;
-  const window=new EventTarget();window.devicePixelRatio=1;window.matchMedia=()=>media;
-  const frames=new Map(),worlds=[];let clock=0,id=0,state,stack=[];
+  const window=new EventTarget();window.devicePixelRatio=1;window.innerWidth=1440;window.innerHeight=900;window.matchMedia=()=>media;
+  const frames=new Map(),worlds=[],intersections=[];let clock=0,id=0,state,stack=[];
   const paint=[],labels=[],portraits=[];let portraitCount=0,canvas;
   const defaults=()=>({matrix:[1,0,0,1,0,0],globalAlpha:1,fillStyle:'#000',strokeStyle:'#000'});
   state=defaults();
@@ -28,17 +28,18 @@ function browser(t){
   const ctx=new Proxy({}, {get(_target,key){return methods[key]??state[key]??(()=>{});},set(_target,key,value){state[key]=value;return true;}});
   const values={window,document,performance:{now:()=>clock},
     Image:class{naturalWidth=64;naturalHeight=64;complete=true;set src(value){this.source=value;if(value.endsWith('superintelligence.png')){this.naturalWidth=403;this.naturalHeight=740;}}get src(){return this.source;}},
-    ResizeObserver:class{observe(){}disconnect(){}},IntersectionObserver:class{observe(){}disconnect(){}},
+    ResizeObserver:class{observe(){}disconnect(){}},IntersectionObserver:class{constructor(callback){intersections.push(callback);}observe(){}disconnect(){}},
     requestAnimationFrame(fn){frames.set(++id,fn);return id;},cancelAnimationFrame(key){frames.delete(key);},
   };
   for(const name of names)Object.defineProperty(globalThis,name,{value:values[name],configurable:true,writable:true});
   t.after(()=>{for(const world of worlds)world.destroy();for(const name of names){const descriptor=original.get(name);if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}});
   return {
     frames,paint,labels,portraits,document,
-    world(options={},size={width:1200,height:760}){canvas=new EventTarget();canvas.getContext=()=>ctx;canvas.getBoundingClientRect=()=>({...size,left:0,top:0});const world=createLabWorld(canvas,options);worlds.push(world);return world;},
+    world(options={},size={width:1200,height:760}){canvas=new EventTarget();canvas.getContext=()=>ctx;canvas.getBoundingClientRect=()=>({left:0,top:0,...size});const world=createLabWorld(canvas,options);worlds.push(world);return world;},
     clear(){paint.length=0;labels.length=0;portraitCount=0;portraits.length=0;},
     click(x,y){clock+=200;const event=new Event('click');Object.defineProperties(event,{clientX:{value:x},clientY:{value:y}});canvas.dispatchEvent(event);},
     frameAt(value){clock=value;const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(clock);},
+    intersection(isIntersecting,time=clock){intersections.at(-1)([{isIntersecting,time}]);},
     get portraitCount(){return portraitCount;},
     reduce(){media.matches=true;const event=new Event('change');Object.defineProperty(event,'matches',{value:true});media.dispatchEvent(event);},
   };
@@ -81,6 +82,27 @@ test('skip, hidden page, reduced motion and destroy always settle the animation 
   const reduced=mock.world();reduced.update(oldWorld());mock.reduce();
   animation=reduced.playPrestige({state:oldWorld(),durationMs:6500});reduced.update(newWorld());assert.equal(mock.frames.size,0);
   await animation;assert.equal(mock.frames.size,0);reduced.destroy();
+});
+
+test('prestige starts immediately after the hidden world tab opens, before observer delivery',async t=>{
+  const mock=browser(t),size={width:0,height:0},world=mock.world({},size),old=oldWorld();
+  world.update(old);mock.intersection(false);assert.equal(mock.frames.size,0);
+  mock.frameAt(100);Object.assign(size,{width:1200,height:760});world.resize();
+  let settled=false;const animation=world.playPrestige({state:old,durationMs:6500}).then(()=>{settled=true;});world.update(newWorld());
+  await Promise.resolve();assert.equal(settled,false,'the animation was not skipped because of the stale observer flag');
+  assert.ok(mock.frames.size>0,'the first frame is scheduled without waiting for an observer callback');
+  mock.intersection(false,0);assert.ok(mock.frames.size>0,'a queued notification from the hidden tab cannot cancel the new animation');
+  mock.clear();mock.frameAt(100+6500*.62);
+  const ground=mock.paint.find(p=>p.color===landColors[0]);assert.ok(ground);assert.ok(ground.alpha>0&&ground.alpha<1,'the world is visibly being absorbed');
+  world.finishPrestige();await animation;assert.equal(mock.frames.size,0);
+});
+
+test('zero-size or offscreen worlds do not start, and leaving the viewport settles an active prestige',async t=>{
+  const mock=browser(t),size={width:1200,height:760,top:950},world=mock.world({},size);
+  world.update(oldWorld());await world.playPrestige({state:oldWorld()});assert.equal(mock.frames.size,0,'offscreen rectangle overrides a stale visible observer flag');
+  Object.assign(size,{top:0,width:0,height:0});await world.playPrestige({state:oldWorld()});assert.equal(mock.frames.size,0,'display:none geometry cannot start a cinematic');
+  Object.assign(size,{width:1200,height:760});world.resize();const animation=world.playPrestige({state:oldWorld()});world.update(newWorld());assert.ok(mock.frames.size>0);
+  mock.frameAt(200);size.top=950;mock.intersection(false);await animation;assert.equal(mock.frames.size,0,'a current offscreen notification still cleans up the promise and frames');
 });
 
 test('the new orbital mind uses the supplied brain, stays inspectable, and joins prestige without changing legacy saves',async t=>{
