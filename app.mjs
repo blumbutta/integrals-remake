@@ -224,10 +224,18 @@ function renderBalance(value){
   const length=label.split(',')[0].length+2;
   balance.style.fontSize=`${Math.max(22,Math.min(56,440/Math.max(8,length)))}px`;
 }
+function renderProfileFrame(s){
+  const run=Math.max(0,Math.floor(s.prestigeCount||0)),frame=prestigeAppearance(run),title=run?`Перерождение №${fmt(run,0)} · ${frame.name} · ${fmt(s.prestige,0)} престижа`:'Ваш профиль';
+  for(const avatar of $$('.profile-button .avatar,#profile-avatar')){
+    avatar.textContent=emoji;avatar.classList.toggle('prestige-avatar',run>0);avatar.title=title;
+    avatar.dataset.frame=String(run%4);avatar.style.setProperty('--frame-accent',frame.accent);avatar.style.setProperty('--frame-turn',`${frame.rotation}deg`);
+  }
+  $('#profile-button').title=title;
+}
 function render(force=false){
   const s=projected(),stats=getStats(s);
-  renderBalance(s.balance);$('#cps').textContent=fmt(stats.cps,2);$('#click-power').textContent=`+${fmt(stats.clickPower)}`;$('#total-earned').textContent=fmt(s.totalEarned);$('#total-clicks').textContent=fmt(s.clicks);$('#multiplier').textContent=`×${fmt(stats.multiplier,2)}`;
-  $('#profile-name').textContent=nickname||'Ваш профиль';$('.profile-button .avatar').textContent=emoji;if($('#profile-dialog').open)refreshAccountStatus();$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#prestige-total').textContent=fmt(s.prestige,0);$('#upgrade-count').textContent=s.upgrades.length;
+  renderBalance(s.balance);$('#cps').textContent=fmt(stats.cps,2);$('#total-earned').textContent=fmt(s.totalEarned);$('#total-clicks').textContent=fmt(s.clicks);
+  $('#profile-name').textContent=nickname||'Ваш профиль';renderProfileFrame(s);if($('#profile-dialog').open)refreshAccountStatus();$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#upgrade-count').textContent=s.upgrades.length;
   $$('#statistics-panel strong[id]').forEach(value=>{value.textContent=value.textContent.replace(/\u00a0/g,' ');value.classList.toggle('stat-long',value.textContent.length>16);value.title=value.textContent;});
   $('#era-label').textContent=s.totalEarned>=1e9?'ЭПОХА IV · ЗА ГРАНЬЮ БЕСКОНЕЧНОСТИ':s.totalEarned>=1e6?'ЭПОХА III · ЕДИНАЯ ТЕОРИЯ':s.totalEarned>=1000?'ЭПОХА II · БОЛЬШИЕ ОТКРЫТИЯ':'ЭПОХА I · ПЕРВЫЙ ПРИНЦИП';
   const nextIndex=s.generators.findIndex(v=>v===0),goal=nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance;
