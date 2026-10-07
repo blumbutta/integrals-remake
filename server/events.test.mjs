@@ -35,6 +35,40 @@ test('binary decode gets 90 seconds and world events stay optional with independ
     assert.ok(e.rules&&e.description&&e.rewardClicks>0);
   }
 });
+test('portal signals have visible reversible circuits and exactly one valid answer per channel',()=>{
+  const definition=EVENTS.find(e=>e.id==='portal');assert.equal(definition.kind,'quiz');assert.equal(definition.durationSec,75);
+  for(let attempt=0;attempt<200;attempt++){
+    const s=createState(0);s.generators[7]=1;applyAction(s,{type:'event_start',itemId:'portal'},0);
+    const event=s.activeEvent;assert.equal(event.deadline,75_000);assert.equal(event.prompts.length,3);
+    assert.equal(event.data.memorizeUntil,undefined);assert.equal(event.data.digits,undefined);
+    const publicEvent=getPublicEvent(event);
+    for(const [i,q] of publicEvent.prompts.entries()){
+      assert.equal(q.circuit.steps.length,i===2?3:2);assert.equal(q.options.length,4);assert.equal(new Set(q.options).size,4);
+      const solutions=q.options.map(Number).filter(input=>{
+        let value=input;
+        for(const step of q.circuit.steps){
+          const [op,n]=step.split(' '),operand=Number(n);
+          value=op==='+'?value+operand:op==='−'?value-operand:op==='×'?value*operand:value/operand;
+          if(!Number.isInteger(value)||value<0)return false;
+        }
+        return value===q.circuit.output;
+      });
+      assert.deepEqual(solutions,[Number(q.options[event._answers[i]])]);
+    }
+    const restored=JSON.parse(JSON.stringify(s));
+    settle(restored,6_000);assert.deepEqual(getPublicEvent(restored.activeEvent).prompts,publicEvent.prompts);
+    applyAction(restored,{type:'event_answer',itemId:event.id,answers:event._answers},6_000);assert.equal(restored.lastEventResult.outcome,'win');
+  }
+});
+test('saved legacy portal memory events keep their original answers, stakes and deadline',()=>{
+  const s=createState(0);s.balance=1000;s.generators[7]=1;
+  s.activeEvent={id:'old-portal',eventId:'portal',kind:'reverse',name:'Обратный сигнал',startedAt:0,deadline:30_000,reward:100,penalty:100,prompts:[{prompt:'Введи четыре цифры в обратном порядке.'}],data:{digits:'1230',memorizeUntil:5000},_answers:['0321']};
+  const restored=JSON.parse(JSON.stringify(s));settle(restored,0);
+  assert.equal(restored.activeEvent.kind,'reverse');assert.equal(restored.activeEvent.deadline,30_000);
+  assert.throws(()=>applyAction(restored,{type:'event_answer',itemId:'old-portal',answers:[321]},0),{code:'invalid_answers'});
+  applyAction(restored,{type:'event_answer',itemId:'old-portal',answers:['0321']},0);
+  assert.equal(restored.lastEventResult.outcome,'win');assert.equal(restored.balance,1100);
+});
 test('events are optional; no failure or penalty occurs without explicit start',()=>{
   const s=createState(0);s.balance=100;s.generators[1]=1;
   settle(s,100000);assert.equal(s.eventStats.losses,0);assert.equal(s.activeEvent,null);assert.ok(s.balance>=100);

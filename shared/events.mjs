@@ -10,7 +10,7 @@ export const EVENTS = Object.freeze([
   {id:'computer',generatorId:'neuron',name:'Двоичный код',description:'Переведи сообщения компьютера.',rules:'Переведи три двоичных числа в десятичные.',kind:'quiz',durationSec:90,rewardClicks:120,cooldownSec:300},
   {id:'professor',generatorId:'quantum',name:'Научный семинар',description:'Подбери первообразные многочленов.',rules:'Выбери неопределённый интеграл каждого выражения.',kind:'quiz',durationSec:45,rewardClicks:180,cooldownSec:300},
   {id:'ai',generatorId:'singularity',name:'Обучение модели',description:'Найди закономерности в последовательностях.',rules:'Выбери следующее число в каждом ряду.',kind:'quiz',durationSec:30,rewardClicks:240,cooldownSec:300},
-  {id:'portal',generatorId:'dimension',name:'Обратный сигнал',description:'Сохрани код, проходящий через портал.',rules:'Запомни четыре цифры за 5 секунд. Введи их в обратном порядке.',kind:'reverse',durationSec:30,rewardClicks:360,cooldownSec:300},
+  {id:'portal',generatorId:'dimension',name:'Обратный сигнал',description:'Портал исказил три сигнала. Восстанови числа на входе.',rules:'Для каждого сигнала выбери исходное число. Операции выполняются по стрелкам слева направо. Чтобы восстановить вход, пройди цепочку справа налево, отменяя каждое действие. Все схемы остаются на экране.',kind:'quiz',durationSec:75,rewardClicks:360,cooldownSec:300},
   {id:'time',generatorId:'universe',name:'Хронология',description:'Верни числа на правильную временную линию.',rules:'Расположи шесть чисел по возрастанию.',kind:'sort',durationSec:45,rewardClicks:480,cooldownSec:300},
   {id:'thought',generatorId:'multiverse',name:'Главный вопрос',description:'Проверь логику Глубокой мысли.',rules:'Три логические задачи. Нужны три верных ответа.',kind:'quiz',durationSec:35,rewardClicks:720,cooldownSec:300},
   ...WORLD_EVENTS,
@@ -26,6 +26,14 @@ function choice(prompt,answer,alternatives){
 }
 function question(kind,index){
   const a=randomInt(2,12),b=randomInt(2,9);
+  if(kind==='portal'){
+    const offset=randomInt(3,9),factor=randomInt(2,5),shift=randomInt(2,7);
+    const input=index===2?a*factor+offset:randomInt(8,24);
+    const steps=index===0?[`+ ${offset}`,`× ${factor}`]:index===1?[`× ${factor}`,`− ${offset}`]:[`− ${offset}`,`÷ ${factor}`,`+ ${shift}`];
+    const output=index===0?(input+offset)*factor:index===1?input*factor-offset:a+shift;
+    const q=choice(`? → ${steps.join(' → ')} → ${output}. Какое число поступило в портал?`,input,[input+1,input-1,input+factor]);
+    q.public.circuit={steps,output};return q;
+  }
   if(kind==='school-olympiad'){
     if(index===0)return choice(`${a} × (${b} + 2) = ?`,a*(b+2),[a*b+2,a+b+2,a*b*2]);
     if(index===1)return choice(`(${a*b} + ${b*2}) / ${b} = ?`,a+2,[a+b,a*2,a-1]);
@@ -75,7 +83,7 @@ export function eventAvailable(state,eventId,now=Date.now()){
 }
 export function getPublicEvent(event){
   if(!event)return null;
-  return {id:event.id,eventId:event.eventId,kind:event.kind,name:event.name,deadline:event.deadline,startedAt:event.startedAt,reward:event.reward,penalty:event.penalty,prompts:event.prompts.map(p=>({...p,...(p.options?{options:[...p.options]}:{})})),data:{...event.data,...(event.data.numbers?{numbers:[...event.data.numbers]}:{})}};
+  return {id:event.id,eventId:event.eventId,kind:event.kind,name:event.name,deadline:event.deadline,startedAt:event.startedAt,reward:event.reward,penalty:event.penalty,prompts:event.prompts.map(p=>({...p,...(p.options?{options:[...p.options]}:{}),...(p.circuit?{circuit:{...p.circuit,steps:[...p.circuit.steps]}}:{})})),data:{...event.data,...(event.data.numbers?{numbers:[...event.data.numbers]}:{})}};
 }
 export function eventStakes(stats,definition){
   const reward=Math.max(definition.rewardClicks*stats.clickPower,stats.cps*30);
@@ -90,8 +98,6 @@ export function startEvent(state,eventId,stats,now=Date.now()){
   let prompts=[],answers=[],data={};
   if(definition.kind==='quiz'){
     for(let i=0;i<3;i++){const q=question(eventId,i);prompts.push(q.public);answers.push(q.answer);}
-  }else if(definition.kind==='reverse'){
-    const digits=String(randomInt(1000,9999));data={digits,memorizeUntil:now+5000};prompts=[{prompt:'Введи четыре цифры в обратном порядке.'}];answers=[digits.split('').reverse().join('')];
   }else{
     const meteors=eventId==='portal-meteors';
     const numbers=new Set();while(numbers.size<6)numbers.add(randomInt(1,meteors?360:99));data={numbers:shuffle([...numbers])};prompts=[{prompt:meteors?'Расставь отметки появления метеоров по времени, от ранней к поздней (секунды).':'Расположи числа по возрастанию.'}];answers=[...numbers].sort((a,b)=>a-b);
