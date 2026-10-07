@@ -11,7 +11,7 @@ node server/dev.mjs
 Игра: `http://127.0.0.1:4180/` или `/integrals-remake/`. Тестовая база создаётся в `.data/integrals-dev.sqlite` внутри каталога игры. Можно задать абсолютный путь через `INTEGRALS_DB_PATH`. Статический сервер не отдаёт содержимое `server/`, скрытые файлы или файлы вне каталога игры.
 
 ```sh
-node --test server/economy.test.mjs server/events.test.mjs server/router.test.mjs
+node --test server/achievements.test.mjs server/economy.test.mjs server/events.test.mjs server/router.test.mjs
 ```
 
 ## Подключение к общему серверу
@@ -53,7 +53,7 @@ integrals.close();
 
 Квитанции действий переживают перезапуск и очищаются раз в 60 секунд, максимум 5000 истёкших записей за проход, по индексу времени. При обычной нагрузке хранится примерно 15–16 минут действий вместо всей истории. Клиент должен повторять потерянный запрос с прежним `id`, а не новым. Непереданные ручные действия после 15 минут отсутствия связи больше не применяются; автоматическое производство рассчитывается независимо и сохраняется по офлайн-правилам.
 
-`player`: `id` (публичный случайный UUID), `nickname`, `listed`, `serverTime`, `lastSeen`, `lastSettled`, `balance`, `totalEarned`, `runEarned`, `clicks`, `generators` (массив количеств в порядке `GENERATORS`), `upgrades` (идентификаторы), `achievements` (идентификаторы 12 достижений; сохраняются после престижа), `activeEvent`, `eventCooldowns`, `eventStats`, `lastEventResult`, `prestige`, `prestigeCount`, `golden:{availableUntil,nextAt}`, `offlineEarned`, `stats:{cps,clickPower,multiplier,prestigeGain}`, `generatorPrices`, `availableUpgrades`.
+`player`: `id` (публичный случайный UUID), `nickname`, `listed`, `serverTime`, `lastSeen`, `lastSettled`, `balance`, `totalEarned`, `runEarned`, `clicks`, `generators` (массив количеств в порядке `GENERATORS`), `upgrades` (идентификаторы), `achievements` (идентификаторы достижений и личных наград `prestige:n`; сохраняются после престижа), `achievementRecords` (пики количества помощников, исследований и производства), `activeEvent`, `eventCooldowns`, `eventStats`, `lastEventResult`, `prestige`, `prestigeCount`, `golden:{availableUntil,nextAt}`, `offlineEarned`, `stats:{cps,clickPower,multiplier,prestigeGain}`, `generatorPrices`, `availableUpgrades`.
 
 Рейтинг содержит только `{id,nickname,totalEarned,prestige,rank}`. Он показывает последнее сохранённое сервером значение и обновляется при heartbeat/действии игрока. По умолчанию профиль участвует с именем «Исследователь …»; участие можно выключить. `period=week` честно возвращает `400 unsupported_period`. Email не запрашивается и не хранится.
 
@@ -92,3 +92,11 @@ integrals.close();
 Награда и штраф фиксируются в момент запуска и заранее видны: награда `max(rewardClicks × clickPower, cps × 30)`, штраф `penaltyClicks × clickPower`. При ошибке или истечении времени снимается не больше текущего баланса. Исторический заработок и рейтинг не уменьшаются; повторный ответ не повторяет выплату/штраф. Правильные ответы находятся в приватном `_answers` в серверной SQLite-state и не передаются в API. Переданный клиентом размер выплаты отвергается как неизвестное поле.
 
 Одновременно активно одно испытание. Пауза между запусками одного типа — 5 минут от старта. `eventStats:{wins,losses}` сохраняет результаты, `eventCooldowns:{[eventId]:epochMs}` — время следующего старта. `lastEventResult:{id,eventId,outcome:'win'|'loss'|'timeout',reward,penalty,at}` сообщает итог. Престиж доступен после завершения активного испытания. Без явного запуска испытания штрафов нет; основная игра продолжает работать во время решения.
+
+## Достижения и оформление
+
+`shared/achievements.mjs` содержит 86 обычных достижений и 8 открываемых оформлений. Исходные 12 идентификаторов сохранены. Награды за клики, помощников, производство, исследования, испытания и перерождения меняют только оформление, не добавляя валюту или множители. Пики `achievementRecords` фиксируются до сброса прогресса и передаются в приватном ответе профиля для корректного отображения прогресса на другом устройстве.
+
+`collectAchievements(state,stats)` возвращает новые идентификаторы, обновляя список и пики. `cosmeticUnlocked(state,id)` проверяет требования выбранного оформления. `prestigeAppearance(prestigeCount)` даёт детерминированный облик по номеру **перерождения**, независимо от числа заработанных очков престижа: первые восемь имеют отдельные названия и направления, следующие используют процедурный цвет и параметры узора.
+
+Каждый фактический `applyAction({type:'prestige'})` добавляет один значок `prestige:n`. Старые сохранения не разворачивают неизвестную историю в огромные массивы: `getPrestigeHonors(count,{offset,limit})` строит отображаемые награды лениво, максимум 100 за вызов. Данные баланса и правила экономики при миграции не меняются.

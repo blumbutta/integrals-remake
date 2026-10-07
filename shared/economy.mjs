@@ -1,4 +1,5 @@
 import { startEvent, answerEvent, settleEvent } from './events.mjs';
+import { collectAchievements as unlockAchievements } from './achievements.mjs';
 
 export const MAX_OFFLINE_MS = 12 * 60 * 60 * 1000;
 export const ACTIVE_GRACE_MS = 30_000;
@@ -33,7 +34,7 @@ const fail=(code,message)=>{throw new EconomyError(code,message);};
 const bounded=value=>Math.min(1e250,Math.max(0,value));
 const schedule=(now,random=Math.random)=>now+90_000+Math.floor(Math.max(0,Math.min(0.99999999,random()))*90_001);
 export function createState(now=Date.now()) {
-  return {version:1,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
+  return {version:1,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
 }
 export function priceFor(itemId,owned,amount=1) {
   const g=typeof itemId==='number'?GENERATORS[itemId]:GENERATORS.find(x=>x.id===itemId);
@@ -52,13 +53,7 @@ export function getStats(state) {
   return {cps:bounded(cps*multiplier),clickPower:bounded(clickPower*multiplier),multiplier,prestigeGain:Math.floor(Math.sqrt(state.runEarned/1_000_000))};
 }
 function credit(state,value){const safe=bounded(value);state.balance=bounded(state.balance+safe);state.totalEarned=bounded(state.totalEarned+safe);state.runEarned=bounded(state.runEarned+safe);return safe;}
-function collectAchievements(state){
-  const owned=new Set(state.achievements||[]),generatorCount=state.generators.reduce((a,b)=>a+b,0);
-  const checks={first:state.totalEarned>=1,click100:state.clicks>=100,auto:generatorCount>=1,hundred:state.totalEarned>=1000,team:generatorCount>=25,research:state.upgrades.length>=3,speed:getStats(state).cps>=100,million:state.totalEarned>=1e6,click1000:state.clicks>=1000,prestige:state.prestigeCount>=1,billion:state.totalEarned>=1e9,all:state.generators.every(n=>n>0)};
-  for(const [id,earned] of Object.entries(checks))if(earned)owned.add(id);
-  state.achievements=[...owned];
-}
-function finished(state,result){collectAchievements(state);return result;}
+function finished(state,result){unlockAchievements(state,getStats(state));return result;}
 export function settle(state,now=Date.now()) {
   if(!Number.isFinite(now))fail('invalid_time','Некорректное время.');
   const until=Math.max(state.lastSettled,now),from=state.lastSettled;
@@ -73,7 +68,7 @@ export function settle(state,now=Date.now()) {
     if(now<=state.golden.nextAt+GOLDEN_WINDOW_MS)state.golden.availableUntil=state.golden.nextAt+GOLDEN_WINDOW_MS;
     else{state.golden.availableUntil=0;state.golden.nextAt=schedule(now);}
   }
-  settleEvent(state,now);collectAchievements(state);return {earned,offlineEarned};
+  settleEvent(state,now);unlockAchievements(state,getStats(state));return {earned,offlineEarned};
 }
 export function applyAction(state,action,now=Date.now()) {
   if(!action||typeof action!=='object'||Array.isArray(action))fail('invalid_action','Некорректное действие.');
@@ -108,7 +103,9 @@ export function applyAction(state,action,now=Date.now()) {
     if(state.activeEvent)fail('event_active','Заверши испытание перед перерождением.');
     const gain=getStats(state).prestigeGain;
     if(gain<1)fail('prestige_locked','Для первого престижа нужен миллион интегралов за цикл.');
-    state.prestige+=gain;state.prestigeCount++;state.balance=0;state.runEarned=0;state.generators=GENERATORS.map(()=>0);state.upgrades=[];state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'prestige',prestigeGain:gain});
+    state.prestige+=gain;state.prestigeCount++;
+    if(Number.isSafeInteger(state.prestigeCount)&&state.prestigeCount>0){const honor=`prestige:${state.prestigeCount}`;if(!state.achievements.includes(honor))state.achievements.push(honor);}
+    state.balance=0;state.runEarned=0;state.generators=GENERATORS.map(()=>0);state.upgrades=[];state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'prestige',prestigeGain:gain});
   }
   if(action.type==='golden'){
     if(state.golden.availableUntil<=0||now>state.golden.availableUntil||now<state.golden.nextAt)fail('golden_unavailable','Золотой интеграл сейчас недоступен.');
