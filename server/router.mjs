@@ -222,7 +222,9 @@ export function createIntegralsHandler({dbPath=process.env.INTEGRALS_DB_PATH,ori
     if(path==='/leaderboard'&&req.method==='GET'){
       const period=search.get('period')||'all';
       if(period!=='all')reject(400,'unsupported_period','Пока доступен общий рейтинг за всё время.');
-      const entries=db.prepare("SELECT public_id AS id,COALESCE(display_nickname,nickname) AS nickname,emoji,total_earned AS totalEarned,COALESCE(json_extract(state,'$.runEarned'),0) AS score,json_extract(state,'$.balance') AS balance,prestige,COALESCE(json_extract(state,'$.cosmicAscensions'),0) AS cosmicAscensions FROM integrals_players WHERE listed=1 ORDER BY prestige DESC,score DESC,created_at ASC,integrals_players.id ASC LIMIT 100").all().map((row,i)=>({...row,emoji:profileEmoji(row.emoji),rank:i+1}));
+      // JSON may store large economy values as SQLite INTEGER. node:sqlite rejects
+      // integers beyond Number.MAX_SAFE_INTEGER; REAL matches our Number economy.
+      const entries=db.prepare("SELECT public_id AS id,COALESCE(display_nickname,nickname) AS nickname,emoji,total_earned AS totalEarned,CAST(COALESCE(json_extract(state,'$.runEarned'),0) AS REAL) AS score,CAST(json_extract(state,'$.balance') AS REAL) AS balance,prestige,COALESCE(json_extract(state,'$.cosmicAscensions'),0) AS cosmicAscensions FROM integrals_players WHERE listed=1 ORDER BY prestige DESC,score DESC,created_at ASC,integrals_players.id ASC LIMIT 100").all().map((row,i)=>({...row,emoji:profileEmoji(row.emoji),rank:i+1}));
       json(res,200,{period:'all',entries,updatedAt:now()});return;
     }
     if(['/health','/players','/state','/action','/profile','/leaderboard'].includes(path))reject(405,'method_not_allowed','Этот метод не поддерживается.');

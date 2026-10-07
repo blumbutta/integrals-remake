@@ -189,6 +189,25 @@ test('leaderboard sorts prestige before current-cycle earnings, independently of
     const hidden=(await f.request(p+'/leaderboard')).data.entries;assert.equal(hidden.length,2);assert.equal(hidden[0].id,second.player.id);assert.equal(hidden[0].rank,1);
   }finally{await f.close();}
 });
+test('leaderboard returns large JSON integer earnings and balances above the JavaScript safe-integer range',async()=>{
+  const f=await fixture();try{
+    const accounts=[];
+    const values=[{score:1e17,balance:0},{score:0,balance:1e17},{score:9e18,balance:2e17}];
+    for(let i=0;i<values.length;i++){
+      const created=(await f.request(p+'/players','POST',{nickname:'Крупный счёт '+i})).data;accounts.push(created);
+      const db=new DatabaseSync(f.dbPath),row=db.prepare('SELECT * FROM integrals_players WHERE public_id=?').get(created.player.id),state=JSON.parse(row.state);
+      state.runEarned=values[i].score;state.balance=values[i].balance;state.totalEarned=1e19;
+      db.prepare('UPDATE integrals_players SET state=?,total_earned=? WHERE id=?').run(JSON.stringify(state),state.totalEarned,row.id);db.close();
+      const response=await f.request(p+'/leaderboard');
+      assert.equal(response.status,200,JSON.stringify(response.data));
+      const entry=response.data.entries.find(entry=>entry.id===created.player.id);
+      assert.equal(entry.score,values[i].score);assert.equal(entry.balance,values[i].balance);assert.equal(entry.totalEarned,state.totalEarned);
+    }
+    const entries=(await f.request(p+'/leaderboard')).data.entries;
+    assert.deepEqual(entries.map(entry=>entry.id),[accounts[2].player.id,accounts[0].player.id,accounts[1].player.id]);
+    assert.deepEqual(entries.map(entry=>entry.rank),[1,2,3]);
+  }finally{await f.close();}
+});
 test('old database receives an additive emoji migration and recovery, receipts and selected emoji survive restart',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'integrals-legacy-')),dbPath=join(dir,'old.sqlite'),t=1_000_000;
   const token='ir_'+'b'.repeat(43),tokenHash=createHash('sha256').update(token).digest('hex'),publicId='b1b4ec24-4ca0-4a52-aac3-727940ae9556';
