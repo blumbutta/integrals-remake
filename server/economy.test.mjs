@@ -97,7 +97,7 @@ test('manual clicks follow production at every stage and prestige is applied onl
   const state=createState(0);state.generators[7]=10;state.upgrades=['click-1','click-2','click-3'];
   const base=getStats(state);
   assert.equal(base.clickProductionShare,0.05);assert.equal(base.clickPower,8+base.cps*0.05);
-  state.prestige=9;const prestiged=getStats(state);
+  state.prestige=state.prestigeCount=9;const prestiged=getStats(state);
   assert.equal(prestiged.clickPower,base.clickPower*1.9);
   const before=state.balance;
   const response=applyAction(state,{type:'click',amount:3},0);
@@ -121,7 +121,7 @@ test('teamwork keeps an early resource useful at late stages without recursive o
   state.generators[0]=200;assert.ok(getStats(state).teamworkBonus<0.14);
   state.generators[0]=1000000;assert.ok(getStats(state).teamworkBonus<0.2);
   // Doubling all direct rates and prestige does not multiply the teamwork share again.
-  state.generators[0]=100;state.prestige=10;
+  state.generators[0]=100;state.prestige=state.prestigeCount=10;
   assert.equal(getStats(state).teamworkBonus,enhanced.teamworkBonus);
   assert.equal(getStats(state).cps,enhanced.cps*2);
 });
@@ -151,7 +151,7 @@ test('late resource payback grows smoothly instead of jumping to ten hours',()=>
 });
 
 test('economy migration credits the pending old interval at old rates, then adopts new rates once',()=>{
-  const state=createState(0);delete state.economyVersion;state.generators[10]=1;state.upgrades=['superintelligence-1'];state.prestige=10;
+  const state=createState(0);delete state.economyVersion;state.generators[10]=1;state.upgrades=['superintelligence-1'];state.prestige=state.prestigeCount=10;
   state.balance=100;state.totalEarned=200;state.runEarned=100;
   const expectedOldRate=240_000_000*2*2;
   const first=settle(state,40000);

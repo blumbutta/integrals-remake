@@ -1,4 +1,4 @@
-import {GENERATORS, UPGRADES, PRESTIGE_PRICE, createState, migrateState, settle, applyAction, getStats, priceFor} from './shared/economy.mjs';
+import {GENERATORS, UPGRADES, PRESTIGE_PRICE, MAX_PRESTIGE, PRESTIGE_VERSION, createState, migrateState, normalizePrestige, settle, applyAction, getStats, priceFor} from './shared/economy.mjs';
 import {EVENTS,eventAvailable,eventStakes,getPublicEvent} from './shared/events.mjs';
 import {PROFILE_EMOJIS,profileEmoji,normalizeNickname,nicknameValidationError} from './shared/profile.mjs';
 import {resourceInfo,resourceDiscovered} from './resource-info.mjs';
@@ -45,9 +45,11 @@ if(mode==='cloud'&&Array.isArray(saved?.pending))pending=saved.pending.slice(0,3
 function validAchievement(id){return typeof id==='string'&&(ACHIEVEMENTS.some(a=>a.id===id)||(/^prestige:[1-9]\d{0,15}$/.test(id)&&Number.isSafeInteger(Number(id.slice(9)))));}
 function validateState(raw,requirePrivateEvent=false){
   if(!raw||typeof raw!=='object')throw Error('Неверный формат сохранения');
-  const s=createState();s.economyVersion=raw.economyVersion===2?2:1;
+  const s=createState();s.economyVersion=raw.economyVersion===2?2:1;s.prestigeVersion=raw.prestigeVersion===PRESTIGE_VERSION?PRESTIGE_VERSION:1;
   if(typeof raw.id==='string'&&/^[0-9a-f-]{36}$/i.test(raw.id))s.id=raw.id;
   if(Number.isSafeInteger(raw.revision)&&raw.revision>=0)s.revision=raw.revision;
+  s.cosmicAscensions=Number.isSafeInteger(raw.cosmicAscensions)&&raw.cosmicAscensions>=0?raw.cosmicAscensions:0;
+  if(raw.legacyPrestige&&['points','count'].every(key=>Number.isFinite(raw.legacyPrestige[key])&&raw.legacyPrestige[key]>=0&&raw.legacyPrestige[key]<=1e250))s.legacyPrestige={points:raw.legacyPrestige.points,count:raw.legacyPrestige.count};
   for(const k of ['balance','totalEarned','runEarned','clicks','prestige','prestigeCount','lastSeen','lastSettled'])if(typeof raw[k]==='number'&&Number.isFinite(raw[k])&&raw[k]>=0&&raw[k]<=1e250)s[k]=raw[k];
   if(!Array.isArray(raw.generators)||![10,GENERATORS.length].includes(raw.generators.length))throw Error('Несовместимое сохранение');
   s.generators=raw.generators.map(n=>Number.isInteger(n)&&n>=0&&n<=10000?n:0);migrateState(s);
@@ -73,6 +75,7 @@ function validateState(raw,requirePrivateEvent=false){
     s.activeEvent=e;
   }
   s.lastSeen=Math.min(s.lastSeen,Date.now());s.lastSettled=Math.min(s.lastSettled,Date.now());
+  normalizePrestige(s);
   return s;
 }
 function save(){
@@ -193,7 +196,7 @@ async function performFlush(){
   queueClicks();if(!pending.length)return;busy=true;const flushEpoch=sessionEpoch;
   try{
     while(pending.length){const action=pending[0];setStatus('Сохраняем…','syncing');
-      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;const delayedPrestige=action.type==='prestige'&&!actionWaiters.has(action.id);if(delayedPrestige){selectedCosmetic='prestige';prestigePage=Math.floor((data.player.prestigeCount-1)/8);}acceptPlayer(data.player);pending.shift();save();if(delayedPrestige)toast('Перерождение подтверждено сервером. Новый облик добавлен в награды.');actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
+      try{const data=await request('/action',{method:'POST',body:JSON.stringify(action)});if(flushEpoch!==sessionEpoch)return;const delayedPrestige=action.type==='prestige'&&!actionWaiters.has(action.id);if(delayedPrestige){selectedCosmetic=data.player.prestigeCount?'prestige':'classic';prestigePage=Math.max(0,Math.floor((data.player.prestigeCount-1)/8));}acceptPlayer(data.player);pending.shift();save();if(delayedPrestige)toast(data.player.prestigeCount?'Перерождение подтверждено сервером. Новый облик добавлен в награды.':'Большой цикл завершён. Престиж и рейтинг обнулены, мир «За гранью бесконечности» открыт навсегда.');actionWaiters.get(action.id)?.(true);actionWaiters.delete(action.id);if(action.type==='golden')toast('Золотой интеграл собран!');}
       catch(error){
         if(flushEpoch!==sessionEpoch)return;
         if(rejectedCloudAction(error)&&error.serverRejected){pending.shift();save();actionWaiters.get(action.id)?.(false);actionWaiters.delete(action.id);toast(error.message);acceptPlayer((await request('/state')).player);continue;}
@@ -267,13 +270,30 @@ function renderBalance(value){
   const length=label.split(',')[0].length+2;
   balance.style.fontSize=`${Math.max(22,Math.min(56,440/Math.max(8,length)))}px`;
 }
+const blackHoleOwnerMark='<span class="black-hole-owner-mark" role="img" aria-label="Владыка чёрной дыры — постоянная награда за завершённый цикл"><svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M10 12 9 5l7 4 4-7 4 7 7-4-1 7Z" fill="#ffe29b" stroke="#8e6027" stroke-width="1.4"/><ellipse cx="20" cy="24" rx="17" ry="9" fill="#271334" stroke="#ffe29b" stroke-width="2" transform="rotate(-23 20 24)"/><circle cx="20" cy="24" r="10" fill="#060812" stroke="#a987df" stroke-width="2"/><path d="M4 28c7 1 22-3 31-11" fill="none" stroke="#fff0be" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="24" r="6" fill="#03040a"/></svg></span>';
 function renderProfileFrame(s){
-  const run=Math.max(0,Math.floor(s.prestigeCount||0)),frame=prestigeAppearance(run),title=run?`Перерождение №${fmt(run,0)} · ${frame.name} · ${fmt(s.prestige,0)} престижа`:'Ваш профиль';
+  const run=Math.min(MAX_PRESTIGE,Math.max(0,Math.floor(s.prestigeCount||0))),owner=(s.cosmicAscensions||0)>0,frame=prestigeAppearance(owner?MAX_PRESTIGE:run);
+  const title=owner?`Владыка чёрной дыры · Сверхбог · завершено циклов: ${fmt(s.cosmicAscensions,0)} · престиж ${fmt(run,0)} / ${MAX_PRESTIGE}`:run?`Перерождение №${fmt(run,0)} · ${frame.name} · престиж ${fmt(run,0)} / ${MAX_PRESTIGE}`:'Ваш профиль';
   for(const avatar of $$('.profile-button .avatar,#profile-avatar')){
-    avatar.textContent=emoji;avatar.classList.toggle('prestige-avatar',run>0);avatar.title=title;
+    const stamp=`${emoji}:${owner}`;
+    if(avatar.dataset.avatarStamp!==stamp){avatar.innerHTML=esc(emoji)+(owner?blackHoleOwnerMark:'');avatar.dataset.avatarStamp=stamp;}
+    avatar.classList.toggle('prestige-avatar',run>0||owner);avatar.classList.toggle('prestige-god',owner);avatar.title=title;
     avatar.dataset.frame=String(run%4);avatar.style.setProperty('--frame-accent',frame.accent);avatar.style.setProperty('--frame-turn',`${frame.rotation}deg`);
   }
   $('#profile-button').title=title;
+  $('#profile-button').setAttribute('aria-label',owner?`Профиль и сохранение. ${title}`:'Профиль и сохранение');
+}
+function renderPrestigeResource(s){
+  const finalCycle=s.prestigeCount>=MAX_PRESTIGE,button=$('#prestige-open');if(!button)return;
+  button.disabled=false;button.setAttribute('aria-disabled','false');button.classList.toggle('prestige-complete',finalCycle);button.classList.toggle('affordable',s.balance>=PRESTIGE_PRICE);
+  button.setAttribute('aria-label',finalCycle?'Чёрная дыра — завершить большой цикл. Престиж и рейтинг обнулятся. Награда — постоянный мир «За гранью бесконечности».':'Чёрная дыра — покупка перерождения');
+  button.title=finalCycle?'Завершение большого цикла: престиж и рейтинг начнутся с нуля, особый мир останется навсегда.':'Каждое перерождение даёт 1 уровень престижа и +10% к базовому производству';
+  $('#prestige-resource-name').textContent=finalCycle?'За гранью бесконечности':'Чёрная дыра';
+  $('#prestige-badge').textContent=s.prestigeCount?`∞ ${fmt(s.prestigeCount,0)} / ${MAX_PRESTIGE}`:'';
+  $('#prestige-resource-description').textContent=finalCycle?'Завершите большой цикл и получите вечный мир':'Перерождение · новая эпоха и уникальный облик';
+  $('#prestige-resource-note').textContent=finalCycle?'Рейтинг и престиж → 0. Особая карта и знак владельца — навсегда.':`+1 уровень · +10% к базовому производству · до ${MAX_PRESTIGE}`;
+  $('#prestige-price').textContent=`${fmt(PRESTIGE_PRICE,0)} ∫`;
+  $('#prestige-resource-action').textContent=finalCycle?'✦ Открыть условия завершения →':'Открыть условия →';
 }
 function render(force=false){
   const s=projected(),stats=getStats(s);
@@ -281,9 +301,9 @@ function render(force=false){
   $('#profile-name').textContent=nickname||'Ваш профиль';renderProfileFrame(s);if($('#profile-dialog').open)refreshAccountStatus();$('#owned-count').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#helpers-total').textContent=fmt(s.generators.reduce((a,b)=>a+b,0),0);$('#upgrade-count').textContent=s.upgrades.length;
   $$('#statistics-panel strong[id]').forEach(value=>{value.textContent=value.textContent.replace(/\u00a0/g,' ');value.classList.toggle('stat-long',value.textContent.length>16);value.title=value.textContent;});
   $('#era-label').textContent=s.totalEarned>=1e9?'ЭПОХА IV · ЗА ГРАНЬЮ БЕСКОНЕЧНОСТИ':s.totalEarned>=1e6?'ЭПОХА III · ЕДИНАЯ ТЕОРИЯ':s.totalEarned>=1000?'ЭПОХА II · БОЛЬШИЕ ОТКРЫТИЯ':'ЭПОХА I · ПЕРВЫЙ ПРИНЦИП';
-  const nextIndex=s.generators.findIndex(v=>v===0),goal=nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance;
-  $('#goal-text').textContent=nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':s.totalEarned>=GENERATORS[nextIndex].basePrice?GENERATORS[nextIndex].name:'Неизвестный ресурс';
-  $('#goal-progress').textContent=value>=goal?'Можно открыть':`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
+  const nextIndex=s.generators.findIndex(v=>v===0),goal=s.prestigeCount>=MAX_PRESTIGE||nextIndex===-1?PRESTIGE_PRICE:GENERATORS[nextIndex].basePrice,value=s.balance,finalCycle=s.prestigeCount>=MAX_PRESTIGE;
+  $('#goal-text').textContent=finalCycle?'Завершите большой цикл — откройте мир за гранью бесконечности.':nextIndex===0?'Первый автоклик. Лаборатория оживает.':nextIndex===-1?'Перерождение. Новый виток бесконечности.':s.totalEarned>=GENERATORS[nextIndex].basePrice?GENERATORS[nextIndex].name:'Неизвестный ресурс';
+  $('#goal-progress').textContent=value>=goal?(finalCycle?'Можно завершить цикл':'Можно открыть'):`Осталось ${fmt(goal-value)} ∫`;$('#goal-bar').style.width=`${Math.min(100,value/goal*100)}%`;
   renderGolden(s,Date.now()+clockOffset);
   const stamp=JSON.stringify([s.generators,s.upgrades,quantity,GENERATORS.map((g,i)=>[s.balance>=priceFor(g.id,s.generators[i],quantity==='max'?maxQuantity(g,i,s.balance):quantity),resourceDiscovered(s,i),quantity==='max'?maxQuantity(g,i,s.balance):0]),UPGRADES.map(u=>{const info=researchInfo(s,u.id);return info?[info.unlocked,info.affordable]:null;}),connected]);
   if(force||stamp!==lastShopStamp){lastShopStamp=stamp;renderShop(s);}
@@ -297,9 +317,8 @@ function render(force=false){
   achievementNoticesReady=true;
   if(!cinematicActive)applyAppearance(s);renderLabScene(s);clickEffects.update(s.generators[0]);
   const regularCount=ACHIEVEMENTS.filter(a=>earnedAchievements.has(a.id)).length;
-  $('#achievement-summary').textContent=`${regularCount} / ${ACHIEVEMENTS.length} · ${fmt(s.prestigeCount,0)} супердостижений`;
-  $('#prestige-badge').textContent=s.prestigeCount?`∞ ${fmt(s.prestigeCount,0)}`:'';
-  $('#prestige-price').textContent=`${fmt(PRESTIGE_PRICE,0)} ∫`;$('#prestige-open').classList.toggle('affordable',s.balance>=PRESTIGE_PRICE);
+  $('#achievement-summary').textContent=`${regularCount} / ${ACHIEVEMENTS.length} · ${fmt(s.cosmicAscensions>0?MAX_PRESTIGE:s.prestigeCount,0)} супердостижений`;
+  renderPrestigeResource(s);
   if(currentPage==='achievements')renderAchievements(s);
   if(currentPage==='rewards')renderRewards(s);
   if(currentPage==='world')renderWorldEvents(s);
@@ -311,7 +330,7 @@ function renderShop(s){
     const count=quantity==='max'?maxQuantity(g,i,s.balance):quantity,price=priceFor(g.id,s.generators[i],count),affordable=s.balance>=price,lock=!resourceDiscovered(s,i);
     return `<button class="generator-card ${affordable?'affordable':''} ${lock?'locked':''}" data-generator="${g.id}" data-count="${count}" aria-disabled="${!affordable}" aria-label="${lock?'Неизвестный ресурс':`Купить ${esc(g.name)}`}, ${count} шт., цена ${fmt(price)} интегралов"><span class="generator-icon icon-${i}"><img class="generator-image" src="${generatorIcon(i)}" alt="" width="52" height="52"></span><span class="generator-info"><h3>${lock?'???':esc(g.name)} <span class="generator-number">${count>1?`×${count}`:''}</span></h3><p>${lock?'Тайна следующего открытия.':esc(g.description)}</p><small>${lock?`Соберите ${fmt(g.basePrice,0)} ∫ за всё время`:`+${fmt(g.baseCps,2)} ∫/с · базовая скорость`}</small></span><span class="generator-meta"><strong>∫ ${fmt(price)}</strong><span>${s.generators[i]>0?`${s.generators[i]} в работе`:lock?'Впереди открытие':'Не приобретено'}</span></span></button>`;
   }).join('');
-  $('#generators-panel').append($('#prestige-resource-template').content.cloneNode(true));
+  $('#generators-panel').append($('#prestige-resource-template').content.cloneNode(true));renderPrestigeResource(s);
   const orderedResearch=researchList(s).map(info=>({info,i:UPGRADES.findIndex(u=>u.id===info.id)}));
   const tile=({info,i})=>{
     const {id,name,resourceName,owned,unlocked,affordable,resourceIndex}=info;
@@ -422,19 +441,21 @@ function showPage(page){
 $$('[data-page]').forEach(b=>b.addEventListener('click',()=>showPage(b.dataset.page)));
 function selectedAppearance(s){
   const run=selectedCosmetic.startsWith('prestige:')?Number(selectedCosmetic.slice(9)):selectedCosmetic==='prestige'?s.prestigeCount:0;
-  if(Number.isSafeInteger(run)&&run>0&&run<=s.prestigeCount)return prestigeAppearance(run);
+  if(Number.isSafeInteger(run)&&run>0&&run<=(s.cosmicAscensions>0?MAX_PRESTIGE:s.prestigeCount))return prestigeAppearance(run);
   const cosmetic=COSMETICS.find(c=>c.id===selectedCosmetic&&cosmeticUnlocked(s,c.id))||COSMETICS[0];
   return {...cosmetic,...cosmetic.colors,hue:cosmetic.hue??(cosmetic.id==='classic'?206:({chalk:145,jade:157,violet:268,amber:38,starfield:211,aurora:170,blueprint:210}[cosmetic.id]||206)),rings:3,rotation:0};
 }
 function applyAppearance(s){
+  document.body.dataset.cosmicAscensions=String(s.cosmicAscensions||0);document.body.classList.toggle('cosmic-world-owned',(s.cosmicAscensions||0)>0);
   const next=selectedAppearance(s);if(appearance?.id===next.id)return;appearance=next;
   document.body.dataset.theme=next.id;document.body.dataset.pattern=next.pattern;
   for(const [key,value]of Object.entries({'--accent':next.accent,'--cosmetic-glow':next.glow,'--theme-tint':next.tint,'--world-hue':next.hue,'--prestige-rings':next.rings,'--theme-rotation':`${next.rotation}deg`}))document.documentElement.style.setProperty(key,String(value));
 }
 function renderRewards(s){
-  const stamp=JSON.stringify([s.achievements,selectedCosmetic,prestigePage,s.prestigeCount]);if(renderRewards.stamp===stamp)return;renderRewards.stamp=stamp;
+  const honorCount=s.cosmicAscensions>0?MAX_PRESTIGE:s.prestigeCount;
+  const stamp=JSON.stringify([s.achievements,selectedCosmetic,prestigePage,honorCount,s.cosmicAscensions]);if(renderRewards.stamp===stamp)return;renderRewards.stamp=stamp;
   const unlocked=COSMETICS.filter(c=>cosmeticUnlocked(s,c.id));
-  $('#cosmetics-panel').innerHTML=`<div class="cosmetics-heading"><div><span class="eyebrow">НАГРАДЫ ЗА ВАШИ ОТКРЫТИЯ</span><h2>Ваша лаборатория — ваш стиль</h2></div><span>${unlocked.length} / ${COSMETICS.length}</span></div><p>Достижения открывают оформление. Выбранный облик сохраняется вместе с игрой.</p><div class="cosmetics-grid">${COSMETICS.map(c=>{const open=cosmeticUnlocked(s,c.id);return `<button class="cosmetic-card ${appearance?.id===c.id?'selected':''}" data-cosmetic="${c.id}" ${open?'':'disabled'} aria-pressed="${appearance?.id===c.id}"><span class="cosmetic-swatch" style="--swatch:${c.colors.accent};--swatch-bg:${c.colors.tint}">${open?'✦':'◇'}</span><strong>${c.name}</strong><small>${c.description}</small><span>${appearance?.id===c.id?'✓ Выбрано':open?'Применить оформление':'Пока закрыто'}</span></button>`;}).join('')}</div>${s.prestigeCount?`<section class="prestige-honors"><div class="cosmetics-heading"><h2>Супердостижения · ${fmt(s.prestigeCount,0)}</h2><span>У каждого перерождения свой мир</span></div><div class="cosmetics-grid">${getPrestigeHonors(s.prestigeCount,{offset:prestigePage*8,limit:8}).map(h=>`<button class="cosmetic-card super-achievement ${appearance?.id===h.id?'selected':''}" data-cosmetic="${h.id}" aria-pressed="${appearance?.id===h.id}"><span class="cosmetic-swatch" style="--swatch:${h.appearance.accent};--swatch-bg:${h.appearance.tint}">∞</span><strong>${esc(h.name)}</strong><small>${esc(h.text)}</small><span>${appearance?.id===h.id?'✓ Выбрано':'Надеть облик'}</span></button>`).join('')}</div>${s.prestigeCount>8?`<div class="honors-pagination"><button class="secondary-button" data-honors-page="-1" ${prestigePage===0?'disabled':''}>← Раньше</button><span>${prestigePage+1} / ${Math.ceil(s.prestigeCount/8)}</span><button class="secondary-button" data-honors-page="1" ${(prestigePage+1)*8>=s.prestigeCount?'disabled':''}>Дальше →</button></div>`:''}</section>`:''}`;
+  $('#cosmetics-panel').innerHTML=`<div class="cosmetics-heading"><div><span class="eyebrow">НАГРАДЫ ЗА ВАШИ ОТКРЫТИЯ</span><h2>Ваша лаборатория — ваш стиль</h2></div><span>${unlocked.length} / ${COSMETICS.length}</span></div><p>Достижения открывают оформление. Выбранный облик сохраняется вместе с игрой.</p><div class="cosmetics-grid">${COSMETICS.map(c=>{const open=cosmeticUnlocked(s,c.id);return `<button class="cosmetic-card ${appearance?.id===c.id?'selected':''}" data-cosmetic="${c.id}" ${open?'':'disabled'} aria-pressed="${appearance?.id===c.id}"><span class="cosmetic-swatch" style="--swatch:${c.colors.accent};--swatch-bg:${c.colors.tint}">${open?'✦':'◇'}</span><strong>${c.name}</strong><small>${c.description}</small><span>${appearance?.id===c.id?'✓ Выбрано':open?'Применить оформление':'Пока закрыто'}</span></button>`;}).join('')}</div>${s.cosmicAscensions>0?`<section class="cosmic-reward-card" aria-label="Постоянная награда за завершение большого цикла"><span class="cosmic-reward-emblem" aria-hidden="true">${blackHoleOwnerMark}</span><div><span class="eyebrow">ВАША НАГРАДА НАВСЕГДА</span><h2>За гранью бесконечности</h2><p>Вы — Владыка чёрной дыры. Особый мир включён на карте и остаётся с вами после каждого перерождения.</p><strong>Завершено больших циклов: ${fmt(s.cosmicAscensions,0)}</strong></div></section>`:''}${honorCount?`<section class="prestige-honors"><div class="cosmetics-heading"><h2>Супердостижения · ${fmt(honorCount,0)}</h2><span>У каждого перерождения свой мир</span></div><div class="cosmetics-grid">${getPrestigeHonors(honorCount,{offset:prestigePage*8,limit:8}).map(h=>`<button class="cosmetic-card super-achievement ${appearance?.id===h.id?'selected':''}" data-cosmetic="${h.id}" aria-pressed="${appearance?.id===h.id}"><span class="cosmetic-swatch" style="--swatch:${h.appearance.accent};--swatch-bg:${h.appearance.tint}">∞</span><strong>${esc(h.name)}</strong><small>${esc(h.text)}</small><span>${appearance?.id===h.id?'✓ Выбрано':'Надеть облик'}</span></button>`).join('')}</div>${honorCount>8?`<div class="honors-pagination"><button class="secondary-button" data-honors-page="-1" ${prestigePage===0?'disabled':''}>← Раньше</button><span>${prestigePage+1} / ${Math.ceil(honorCount/8)}</span><button class="secondary-button" data-honors-page="1" ${(prestigePage+1)*8>=honorCount?'disabled':''}>Дальше →</button></div>`:''}</section>`:''}`;
 }
 function renderAchievements(s){
   const stamp=JSON.stringify([s.achievementRecords,Math.floor(s.totalEarned),s.clicks,s.eventStats,earnedAchievements.size,achievementFilter]);if(stamp===lastAchievementStamp)return;lastAchievementStamp=stamp;
@@ -446,7 +467,7 @@ function renderAchievements(s){
 }
 $('#achievement-filters').addEventListener('click',e=>{const b=e.target.closest('[data-achievement-filter]');if(b){achievementFilter=b.dataset.achievementFilter;renderAchievements(projected());}});
 $('#cosmetics-panel').addEventListener('click',e=>{
-  const page=e.target.closest('[data-honors-page]');if(page){prestigePage=Math.max(0,Math.min(Math.ceil(state.prestigeCount/8)-1,prestigePage+Number(page.dataset.honorsPage)));render(true);return;}
+  const page=e.target.closest('[data-honors-page]');if(page){prestigePage=Math.max(0,Math.min(Math.ceil((state.cosmicAscensions>0?MAX_PRESTIGE:state.prestigeCount)/8)-1,prestigePage+Number(page.dataset.honorsPage)));render(true);return;}
   const b=e.target.closest('[data-cosmetic]');if(!b||b.disabled)return;
   selectedCosmetic=b.dataset.cosmetic;save();render(true);toast(`Оформление: ${appearance.name}`);
 });
@@ -458,7 +479,7 @@ async function loadRanking(){
   content.innerHTML='<div class="empty-state"><span>◎</span><h2>Связываемся с лабораториями мира…</h2></div>';
   try{const {entries}=await request('/leaderboard?period=all');
     if(!entries?.length){content.innerHTML='<div class="empty-state"><span>↗</span><h2>Первое место пока свободно.</h2><p>Подключите облачное сохранение в профиле, чтобы участвовать в рейтинге.</p><button class="secondary-button" id="ranking-profile">Открыть профиль</button></div>';$('#ranking-profile').addEventListener('click',openProfile);return;}
-    content.innerHTML=`<table class="ranking-table"><caption>Места по интегралам за всё время · первые 100 игроков</caption><thead><tr><th scope="col">Место</th><th scope="col">Исследователь</th><th scope="col">Интегралы</th><th scope="col">Престиж</th></tr></thead><tbody>${entries.map(p=>`<tr class="ranking-row ${p.rank<=3?`rank-top rank-${p.rank}`:''} ${p.id===state.id?'is-me':''}" data-rank="${p.rank}"><td class="rank-place" data-label="Место"><span aria-hidden="true">${p.rank<=3?['🥇','🥈','🥉'][p.rank-1]:''}</span><strong>№ ${fmt(p.rank,0)}</strong></td><td class="rank-player"><span class="rank-avatar" aria-hidden="true">${esc(profileEmoji(p.emoji))}</span><span class="rank-name rank-identity">${esc(p.nickname)}${p.id===state.id?'<small>Это вы</small>':''}</span></td><td class="rank-score" data-label="Интегралы"><strong>${fmt(p.totalEarned,2)} ∫</strong><small>${Number.isFinite(p.balance)?`На балансе: ${fmt(p.balance,2)} ∫`:'За всё время'}</small></td><td class="rank-prestige" data-label="Престиж"><strong>∞ ${fmt(p.prestige,0)}</strong></td></tr>`).join('')}</tbody></table>`;
+    content.innerHTML=`<table class="ranking-table"><caption>Места по интегралам за всё время · первые 100 игроков</caption><thead><tr><th scope="col">Место</th><th scope="col">Исследователь</th><th scope="col">Интегралы</th><th scope="col">Престиж</th></tr></thead><tbody>${entries.map(p=>`<tr class="ranking-row ${p.rank<=3?`rank-top rank-${p.rank}`:''} ${p.id===state.id?'is-me':''}" data-rank="${p.rank}"><td class="rank-place" data-label="Место"><span aria-hidden="true">${p.rank<=3?['🥇','🥈','🥉'][p.rank-1]:''}</span><strong>№ ${fmt(p.rank,0)}</strong></td><td class="rank-player"><span class="rank-avatar ${p.cosmicAscensions>0?'cosmic-rank-avatar':''}" aria-hidden="true">${esc(profileEmoji(p.emoji))}${p.cosmicAscensions>0?blackHoleOwnerMark:''}</span><span class="rank-name rank-identity">${esc(p.nickname)}${p.cosmicAscensions>0?'<small class="rank-cosmic-title">Владыка чёрной дыры</small>':''}${p.id===state.id?'<small>Это вы</small>':''}</span></td><td class="rank-score" data-label="Интегралы"><strong>${fmt(p.totalEarned,2)} ∫</strong><small>${Number.isFinite(p.balance)?`На балансе: ${fmt(p.balance,2)} ∫`:'За всё время'}</small></td><td class="rank-prestige" data-label="Престиж"><strong>∞ ${fmt(p.prestige,0)}</strong></td></tr>`).join('')}</tbody></table>`;
   }catch(error){
     content.innerHTML=`<div class="empty-state"><span>◎</span><h2>Рейтинг временно недоступен.</h2><p>${error.code==='storage_unavailable'?'Облачное хранилище ещё подключается. Прогресс в браузере продолжает сохраняться.':'Не удалось связаться с сервером. Попробуйте обновить рейтинг немного позже.'}</p><button class="secondary-button" id="retry-ranking">Попробовать снова</button></div>`;$('#retry-ranking').addEventListener('click',loadRanking);
   }finally{refresh.disabled=false;refresh.setAttribute('aria-busy','false');if(label)label.textContent='Обновить';}
@@ -562,12 +583,22 @@ function setCinematicUI(active){
 }
 function openPrestige(){
   if(readOnlyTab){showReadOnlyNotice();return;}
-  const s=projected(),stats=getStats(s),next=prestigeAppearance(s.prestigeCount+1),missing=Math.max(0,PRESTIGE_PRICE-s.balance);
+  const s=projected(),finalCycle=s.prestigeCount>=MAX_PRESTIGE,stats=getStats(s),nextCount=finalCycle?0:Math.min(MAX_PRESTIGE,s.prestigeCount+1),next=finalCycle?{name:'За гранью бесконечности'}:prestigeAppearance(nextCount),missing=Math.max(0,PRESTIGE_PRICE-s.balance);
   $('#prestige-step-one').hidden=false;$('#prestige-step-two').hidden=true;
   $('#prestige-audio-enabled').checked=cinematicSound;
-  $('#prestige-details').innerHTML=`<div class="prestige-reward"><span>Цена чёрной дыры</span><strong>${fmt(PRESTIGE_PRICE,0)} ∫</strong></div><div><span>Ваш баланс</span><strong>${fmt(s.balance,0)} ∫</strong></div><div><span>За перерождение</span><strong>+${fmt(stats.prestigeGain)} ∞</strong></div><div class="prestige-reward"><span>Супердостижение и уникальный облик</span><strong>${esc(next.name)}</strong></div>${missing>0?`<p class="prestige-missing">Не хватает ${fmt(missing,0)} ∫. Развивайте производство и возвращайтесь.</p>`:''}`;
-  $('#prestige-confirm').disabled=missing>0||stats.prestigeGain<1||Boolean(s.activeEvent)||readOnlyTab;
-  $('#prestige-confirm').textContent=s.activeEvent?'Сначала завершите испытание':missing>0?'Пока недостаточно интегралов':'Да, хочу переродиться';
+  $('#prestige-dialog').classList.toggle('cosmic-ascension-dialog',finalCycle);$('#prestige-dialog').dataset.cosmicReset=String(finalCycle);
+  $('#prestige-title').textContent=finalCycle?'За гранью бесконечности':'За горизонтом событий';
+  $('#prestige-introduction').innerHTML=finalCycle?`Вы достигли <strong>${MAX_PRESTIGE}-го престижа</strong>. Ещё один переход за <strong>${fmt(PRESTIGE_PRICE,0)} ∫</strong> завершит большой цикл и навсегда откроет особый дизайн карты и знак Владыки чёрной дыры.`:`Перерождение стоит <strong>${fmt(PRESTIGE_PRICE,0)} ∫</strong> и даёт <strong>ровно 1 уровень престижа</strong>. Бонусы складываются: +10% к базовому производству за уровень, от ×1,1 до ×11 на ${MAX_PRESTIGE}-м уровне.`;
+  $('#prestige-cost-warning').innerHTML=finalCycle?'<strong>Интегралы за всё время и результат в мировом рейтинге обнулятся. Престиж станет 0, множитель — ×1.</strong> Весь текущий баланс, помощники и исследования также начнутся заново.':'После перехода <strong>весь текущий баланс станет нулевым</strong>, включая сумму сверх стоимости перерождения.';
+  $('#prestige-preserved-note').textContent=finalCycle?'Достижения, открытые оформления, профиль и постоянная награда «За гранью бесконечности» останутся с вами.':'Весь текущий баланс, помощники и исследования начнутся заново. Статистика за всё время, достижения и место в рейтинге сохранятся.';
+  $('#prestige-details').innerHTML=`<div class="prestige-reward"><span>Цена чёрной дыры</span><strong>${fmt(PRESTIGE_PRICE,0)} ∫</strong></div><div><span>Ваш баланс</span><strong>${fmt(s.balance,0)} ∫</strong></div><div><span>${finalCycle?'Престиж после перехода':'За перерождение'}</span><strong>${finalCycle?`0 / ${MAX_PRESTIGE}`:`+1 уровень · ${fmt(nextCount,0)} / ${MAX_PRESTIGE}`}</strong></div><div><span>Множитель сейчас</span><strong>×${fmt(stats.multiplier,1)}</strong></div><div><span>После перехода</span><strong>×${fmt(1+nextCount*0.1,1)}</strong></div><div class="prestige-reward"><span>${finalCycle?'Постоянная награда · уникальная карта и знак владельца':'Супердостижение и уникальный облик'}</span><strong>${esc(next.name)}</strong></div>${missing>0?`<p class="prestige-missing">Не хватает ${fmt(missing,0)} ∫. Развивайте производство и возвращайтесь.</p>`:''}`;
+  $('#prestige-confirm').disabled=missing>0||(!finalCycle&&stats.prestigeGain<1)||Boolean(s.activeEvent)||readOnlyTab;
+  $('#prestige-confirm').textContent=s.activeEvent?'Сначала завершите испытание':missing>0?'Пока недостаточно интегралов':finalCycle?'Да, завершить большой цикл':'Да, хочу переродиться';
+  $('#prestige-final-title').textContent=finalCycle?'Обнулить рейтинг и престиж?':'Вы готовы начать новую эпоху?';
+  $('#prestige-final-warning').textContent=finalCycle?'Подтвердите ещё раз: все интегралы за всё время и результат в мировом рейтинге станут нулевыми, престиж — 0. Это нельзя отменить. Награда «За гранью бесконечности» останется навсегда.':'После перехода вернуться к текущей лаборатории нельзя. Пожалуйста, подтвердите перерождение ещё раз.';
+  $('#prestige-reset-items').textContent=finalCycle?'Баланс · помощники · исследования · интегралы за всё время · рейтинг · престиж':'Весь баланс · помощники · исследования';
+  $('#prestige-kept-items').textContent=finalCycle?'Достижения · открытые оформления · награда Владыки чёрной дыры':'Престиж · достижения · рекорд и рейтинг';
+  $('#prestige-final-confirm').textContent=finalCycle?'Да, обнулить рейтинг и завершить цикл':'Да, начать новую эпоху';
   $('#prestige-final-confirm').disabled=false;$('#prestige-dialog').showModal();
 }
 $('#generators-panel').addEventListener('click',event=>{if(event.target.closest('#prestige-open'))openPrestige();});
@@ -575,14 +606,16 @@ $('#prestige-confirm').addEventListener('click',()=>{$('#prestige-step-one').hid
 $('#prestige-back').addEventListener('click',()=>{$('#prestige-step-two').hidden=true;$('#prestige-step-one').hidden=false;$('#prestige-confirm').focus();});
 $('#prestige-final-confirm').addEventListener('click',async()=>{
   if(prestigeSubmitting)return;
+  const oldWorld=structuredClone(projected()),confirmCosmicReset=$('#prestige-dialog').dataset.cosmicReset==='true';
+  if((oldWorld.prestigeCount>=MAX_PRESTIGE)!==confirmCosmicReset){openPrestige();toast('Уровень престижа изменился. Проверьте новые условия перехода.');return;}
   prestigeSubmitting=true;$('#prestige-final-confirm').disabled=true;
   cinematicSound=$('#prestige-audio-enabled').checked;save();
-  const oldWorld=structuredClone(projected()),oldAppearance={...appearance},resumeMusic=music.playing;
+  const oldAppearance={...appearance},resumeMusic=music.playing;
   if(cinematicSound)Promise.resolve(prestigeAudio.prepare?.()).catch(()=>{});
   setCinematicUI(true);$('#world-cinematic-skip').disabled=true;let succeeded=false;
   try{
-    succeeded=await act({type:'prestige'});if(!succeeded)return;
-    selectedCosmetic='prestige';prestigePage=Math.floor((state.prestigeCount-1)/8);save();$('#prestige-dialog').close();
+    succeeded=await act({type:'prestige',...(confirmCosmicReset?{confirmCosmicReset:true}:{})});if(!succeeded)return;
+    selectedCosmetic=state.prestigeCount?'prestige':'classic';prestigePage=Math.max(0,Math.floor((state.prestigeCount-1)/8));save();$('#prestige-dialog').close();
     showPage('world');$('#world-widget').scrollIntoView({block:'start',behavior:'instant'});
     music.pause();updateMusic();
     const duration=matchMedia('(prefers-reduced-motion: reduce)').matches?450:6500;
@@ -598,7 +631,7 @@ $('#prestige-final-confirm').addEventListener('click',async()=>{
     render(true);
     if(musicEnabled&&!document.hidden){resumeMusicAfterVisibility=false;startPreferredMusic();}
     else if(musicEnabled)resumeMusicAfterVisibility=true;
-    if(succeeded){$('#world-cinematic-status').textContent=`Эпоха ${fmt(state.prestigeCount,0)} · ${appearance.name}. Новый мир ждёт первых жителей.`;toast(`Перерождение №${fmt(state.prestigeCount,0)}. Облик «${appearance.name}» добавлен в награды.`);}
+    if(succeeded){const completedCycle=(state.cosmicAscensions||0)>(oldWorld.cosmicAscensions||0);$('#world-cinematic-status').textContent=completedCycle?'За гранью бесконечности. Ваш особый мир останется с вами навсегда.':`Эпоха ${fmt(state.prestigeCount,0)} · ${appearance.name}. Новый мир ждёт первых жителей.`;toast(completedCycle?'Большой цикл завершён! Престиж и рейтинг обнулены. Вы — Владыка чёрной дыры, особый мир открыт навсегда.':`Перерождение №${fmt(state.prestigeCount,0)}. Облик «${appearance.name}» добавлен в награды.`);}
   }
 });
 $('#world-cinematic-skip').addEventListener('click',()=>{prestigeAudio.stop();world.finishPrestige();});
@@ -636,11 +669,15 @@ function fitResidentRows(){
 }
 function renderLabScene(s){
   const target=$('#lab-roster'),total=s.generators.reduce((a,b)=>a+b,0);if(!cinematicActive)world.update(s,{hue:appearance.hue,accent:appearance.accent,now:Date.now()+clockOffset});
-  const stamp=JSON.stringify(s.generators);if(renderLabScene.stamp!==stamp){renderLabScene.stamp=stamp;
+  const stamp=JSON.stringify([s.generators,s.prestigeCount,s.cosmicAscensions]);if(renderLabScene.stamp!==stamp){renderLabScene.stamp=stamp;
     const owned=GENERATORS.map((g,i)=>({g,i,n:s.generators[i]})).filter(x=>x.n>0);
     const residents=owned.filter(x=>x.i!==0);
     target.innerHTML=residents.length?residents.map(({g,i,n})=>`<div class="lab-scene-row ${i===3?'roster-teacher':''}" data-resident-index="${i}" data-resident-count="${n}" data-resident-kind="${g.id}" style="--resident-room:url('./assets/rooms/${g.id}.svg')"><strong>${esc(g.name)} <span>×${fmt(n,0)}</span></strong><div class="resident-strip" aria-hidden="true"></div></div>`).join(''):'<div class="lab-scene-empty"><p>Пока здесь тихо.</p><small>Пригласите школьника в «Ресурсах». Автоклики отображаются вокруг интеграла.</small></div>';
     fitResidentRows();
+    const cosmicWorld=(s.cosmicAscensions||0)>0;
+    $('#world-title').textContent=cosmicWorld?'За гранью бесконечности':'Мир интегралов';
+    $('#world-subtitle').textContent=cosmicWorld?'Ваш особый мир · навсегда':'Открывайте районы и выбирайте испытания';
+    $('#world-atlas-title').textContent=cosmicWorld?'Вселенная Владыки чёрной дыры':'Атлас бесконечности';
     $('#world-status').textContent=total?`${fmt(total,0)} жителей · ${worldLocations(s).filter(location=>location.unlocked).length} открытых районов · эпоха ${fmt((s.prestigeCount||0)+1,0)}`:'Приглашайте жителей: вместе с ними открываются новые районы.';
     $('#world-canvas').setAttribute('aria-label',total?`Мир интегралов. ${owned.map(x=>`${x.g.name}: ${x.n}`).join(', ')}. Подробности — в списке жителей.`:'Мир интегралов ждёт первого помощника.');
   }

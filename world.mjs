@@ -47,10 +47,11 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   const snapshot=(state={},options={})=>{
     const counts=Array.from({length:GENERATORS.length},(_,i)=>Number.isFinite(state.generators?.[i])?Math.max(0,Math.floor(state.generators[i])):0);
     const prestige=Number.isFinite(state.prestige)?Math.max(0,state.prestige):0;
+    const cosmicAscensions=Number.isFinite(state.cosmicAscensions)?Math.max(0,Math.floor(state.cosmicAscensions)):0;
     const hue=Number.isFinite(Number(options.hue))?((Number(options.hue)%360)+360)%360:206+Math.min(65,Math.log2(prestige+1)*5);
     const now=Number.isFinite(options.now)?options.now:Date.now();
     const markers=LOCATIONS.map(location=>{const events=worldEventsFor(state,location.id);return {ready:events.filter(event=>eventAvailable(state,event.id,now)).length,active:events.some(event=>event.id===state.activeEvent?.eventId)};});
-    return {counts,prestige,hue,accent:typeof options.accent==='string'?options.accent:'#a8f4ef',total:counts.reduce((a,b)=>a+b,0),markers};
+    return {counts,prestige,cosmicAscensions,hue,accent:typeof options.accent==='string'?options.accent:'#a8f4ef',total:counts.reduce((a,b)=>a+b,0),markers};
   };
   let latest=snapshot(),shown=latest;
   const images=FILES.map(file=>{const image=new Image();image.decoding='async';image.onload=image.onerror=()=>{if(!destroyed)draw();};image.src=new URL(file,import.meta.url).href;return image;});
@@ -100,6 +101,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     paint();ctx.restore();
   }
   function sky(){
+    if(shown.cosmicAscensions){cosmicSky();return;}
     const p=progress(),space=cinema&&!cinema.reduced?(p<.84?smooth((p-.28)/.46):1-smooth((p-.84)/.14)):0;
     const groundColor=`rgb(${Math.round(36-30*space)},${Math.round(71-49*space)},${Math.round(63-22*space)})`;
     const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#061629');g.addColorStop(.4,'#18374b');g.addColorStop(1,groundColor);ctx.fillStyle=g;ctx.fillRect(view.left,view.top,view.right-view.left,view.bottom-view.top);
@@ -115,6 +117,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     const points=[[457,65],[489,36],[532,56],[547,91],[515,113]];line(points,'rgba(162,208,210,.11)',.8);for(const [x,y]of points)ellipse(x,y,1.4,1.4,'#8aa9b5');
   }
   function terrain(){
+    if(shown.cosmicAscensions){cosmicTerrain();return;}
     poly([[view.left,428],[0,428],[153,366],[288,397],[439,325],[647,355],[782,309],[982,359],[1200,425],[view.right,425],[view.right,view.bottom],[view.left,view.bottom]],'#244944');
     poly([[view.left,567],[0,567],[123,472],[327,471],[520,424],[654,443],[781,400],[1002,462],[1200,491],[view.right,491],[view.right,view.bottom],[view.left,view.bottom]],'#2b5145');
     poly([[view.left,671],[0,671],[203,611],[348,655],[595,596],[785,667],[1056,607],[1200,641],[view.right,641],[view.right,view.bottom],[view.left,view.bottom]],'#2b4c3d');
@@ -127,13 +130,114 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     // Grass and stones are deterministic and do not allocate during a frame.
     for(let i=0;i<76;i++){const x=20+seed(i+803)*1160,y=425+seed(i+913)*315;if(y>700||x<53||x>1150||seed(i+71)>.47){line([[x-2,y],[x-4,y-5],[x,y-2],[x+3,y-7]],'rgba(135,167,111,.3)',1);}}
   }
+  // A permanent reward after a complete century of worlds: new geometry, not a
+  // colour filter. All loops have fixed budgets and honour the normal RAF gate.
+  function cosmicSky(){
+    const g=ctx.createLinearGradient(0,view.top,0,view.bottom);g.addColorStop(0,'#080b23');g.addColorStop(.45,'#17233d');g.addColorStop(1,'#101b35');ctx.fillStyle=g;ctx.fillRect(view.left,view.top,view.right-view.left,view.bottom-view.top);
+    glow(281,146,460,'#614298',.26);glow(935,126,430,'#167d8e',.24);glow(619,541,440,'#573c79',.14);
+    // Layered ribbons read as a nebula even when motion is disabled.
+    ctx.save();ctx.translate(604,150);ctx.rotate(-.27);
+    for(let i=0;i<7;i++){
+      const shift=reduced?0:Math.sin(time*.045+i*.65)*5;
+      ctx.beginPath();ctx.moveTo(-1050,42+i*13+shift);ctx.bezierCurveTo(-450,-105+i*13,40,146-i*13,1060,-40+i*15);ctx.strokeStyle=i%2?'rgba(122,104,203,.045)':'rgba(130,235,220,.04)';ctx.lineWidth=42-i*3;ctx.stroke();
+    }
+    ctx.restore();
+    for(let i=0;i<158;i++){
+      const x=view.left+seed(i+43)*(view.right-view.left),y=view.top+seed(i+83)*(view.bottom-view.top),r=i%19===0?1.8:.65,alpha=.2+seed(i+123)*.48+(reduced?0:Math.sin(time*.38+i)*.09);
+      ellipse(x,y,r,r,`rgba(222,239,250,${alpha})`);
+      if(i%31===0){line([[x-5,y],[x+5,y]],'rgba(205,245,251,.28)',.6);line([[x,y-5],[x,y+5]],'rgba(205,245,251,.28)',.6);}
+    }
+    // The distant horizon is an astronomical lens, separate from the transient
+    // prestige hole. It never sits over a building or an event marker.
+    const x=592,y=64,pulse=reduced?0:Math.sin(time*.32)*2;
+    glow(x,y,173,'#c294d3',.23);glow(x,y,99,'#e9dfb4',.13);
+    ellipse(x,y,118+pulse,34,null,'rgba(175,218,236,.18)',1);
+    ellipse(x,y,87,48,null,'rgba(212,166,239,.25)',1);
+    ellipse(x,y,54,54,null,'#b7a4d0',1.1);ellipse(x,y,47,47,'#020711','#f9e3b2',2.2);
+    ctx.beginPath();ctx.ellipse(x,y,122,22,-.17,0,Math.PI);ctx.strokeStyle='#eed2a4';ctx.lineWidth=3;ctx.stroke();
+    ctx.beginPath();ctx.ellipse(x,y,104,16,-.17,0,Math.PI);ctx.strokeStyle='rgba(232,247,240,.7)';ctx.lineWidth=1.4;ctx.stroke();
+    for(let i=0;i<12;i++){
+      const a=i/12*Math.PI*2+(reduced?0:time*.035),px=x+Math.cos(a)*153,py=y+Math.sin(a)*66;
+      ellipse(px,py,1.5,1.5,i%3?'#b4dcdf':'#f2daae');
+    }
+    const constellations=[[[13,163],[59,119],[89,155],[113,112]],[[773,51],[810,29],[829,67],[791,89],[773,51]],[[39,666],[83,697],[123,665],[164,699]],[[1095,611],[1146,638],[1124,676],[1174,704]]];
+    for(const points of constellations){line(points,'rgba(193,178,235,.24)',1);for(const [sx,sy]of points)ellipse(sx,sy,2,2,'#cbd8ef');}
+    // Great orbital arcs bind the sky and the floating archipelago together.
+    for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(600,410,585+i*53,212+i*30,-.13,0,Math.PI*2);ctx.strokeStyle=i===1?'rgba(225,193,136,.13)':'rgba(146,203,234,.075)';ctx.lineWidth=1;ctx.stroke();}
+  }
+  function cosmicTerrain(){
+    // The familiar district coordinates become one suspended, faceted continent.
+    // Empty districts receive exactly the same terrain as discovered districts.
+    poly([[13,485],[136,408],[297,440],[437,363],[650,390],[805,359],[1045,427],[1190,499],[1148,573],[1028,618],[857,614],[709,675],[580,634],[434,682],[284,629],[161,633],[50,565]],'#121c35','#63567e',1.2);
+    poly([[50,522],[164,527],[284,587],[434,636],[439,717],[368,684],[319,707],[238,660],[161,633]],'#242847');
+    poly([[434,636],[580,600],[710,631],[709,713],[650,678],[607,707],[530,678],[439,717]],'#302947');
+    poly([[710,631],[858,569],[1033,580],[1148,546],[1028,650],[962,632],[886,667],[823,640],[709,713]],'#1a2c43');
+    poly([[13,485],[136,392],[297,426],[437,349],[650,377],[805,344],[1045,412],[1190,484],[1148,546],[1033,580],[858,569],[710,631],[580,600],[434,636],[284,587],[164,580],[50,522]],'#284354','#78929e',1.6);
+    poly([[52,478],[144,416],[299,449],[437,374],[650,402],[804,369],[1027,437],[1132,487],[1014,550],[851,546],[710,608],[580,575],[434,610],[285,563],[164,551]],'#304a59');
+    line([[13,485],[50,522],[164,580],[284,587],[434,636],[580,600],[710,631],[858,569],[1033,580],[1148,546],[1190,484]],'#9be6dd',2.2);
+    for(const points of [[[164,580],[210,617],[238,660]],[[434,636],[447,663],[439,699]],[[580,600],[603,632],[607,686]],[[858,569],[849,611],[823,640]],[[1033,580],[1006,606],[1028,633]]])line(points,'rgba(139,198,240,.54)',1.5);
+    // A luminous river of ideas winds across the suspended surface.
+    const river=()=>{ctx.beginPath();ctx.moveTo(62,497);ctx.bezierCurveTo(318,628,489,529,590,605);ctx.bezierCurveTo(799,704,896,477,1158,503);};
+    river();ctx.lineWidth=22;ctx.strokeStyle='#182b42';ctx.stroke();river();ctx.lineWidth=12;ctx.strokeStyle='#427389';ctx.stroke();river();ctx.lineWidth=2;ctx.strokeStyle='#9be0e0';ctx.stroke();
+    const routes=[[[150,493],[315,550],[453,481],[HUB.x,HUB.y]],[[437,343],[480,414],[511,487],[HUB.x,HUB.y]],[[HUB.x,HUB.y],[741,606],[849,560],[951,520]],[[701,267],[679,351],[727,406],[808,480]],[[971,508],[1034,459],[1060,410],[1102,399]]];
+    for(const route of routes){ctx.beginPath();ctx.moveTo(...route[0]);ctx.bezierCurveTo(...route[1],...route[2],...route[3]);ctx.lineWidth=18;ctx.strokeStyle='#102839';ctx.stroke();ctx.lineWidth=11;ctx.strokeStyle='#567681';ctx.stroke();ctx.lineWidth=1;ctx.strokeStyle='#c4eadb';ctx.setLineDash([2,11]);ctx.stroke();ctx.setLineDash([]);}
+    // Small fragments make the gaps and antigravity silhouette visible at a glance.
+    for(let i=0;i<13;i++){
+      const x=75+seed(i+628)*1080,y=650+seed(i+661)*93,r=5+seed(i+664)*13;
+      poly([[x-r,y],[x,y-r*.45],[x+r,y],[x+r*.27,y+r*.95],[x-r*.42,y+r*.58]],'#28314c','#708b9c',.8);line([[x-r,y],[x,y-r*.45],[x+r,y]],'rgba(168,231,226,.6)',1);
+    }
+  }
+  function crystalTree(x,y,size,key){
+    const lavender=key%3===0,color=lavender?'#cca8e9':'#9be6dc';
+    ellipse(x,y+3,19*size,5*size,'rgba(7,15,33,.36)',color,.6);
+    for(let i=0;i<3;i++){
+      const dx=x+(i-1)*11*size,bottom=y-(i===1?0:2)*size,top=bottom-(i===1?56:31)*size,w=(i===1?10:8)*size;
+      poly([[dx-w,bottom-10*size],[dx-w*.45,top+9*size],[dx,top],[dx+w,top+14*size],[dx+w*.65,bottom]],lavender?'#4b4d78':'#356679',color,.9);
+      poly([[dx,top],[dx+w,top+14*size],[dx+w*.65,bottom],[dx,bottom-9*size]],lavender?'#6b6089':'#579296');
+      line([[dx,top],[dx,bottom-9*size]],color,1);
+    }
+    ellipse(x,y-60*size,1.6,1.6,'#eceddf');
+  }
+  function cosmicBuilding(location,index){
+    const [,y,w,h]=location.bounds;
+    glow(location.x,y+h*.7,w*.58,index%2?'#ae83cf':'#78dccc',.08);
+    // A generic orbit only around owned structures, never a hint in unknown fog.
+    ctx.beginPath();ctx.ellipse(location.x,y+h*.66,w*.49,h*.16,-.12,0,Math.PI*2);ctx.strokeStyle='rgba(160,235,224,.32)';ctx.lineWidth=1;ctx.stroke();
+    const angle=index*1.4+(reduced?0:time*.12),sx=location.x+Math.cos(angle)*w*.49,sy=y+h*.66+Math.sin(angle)*h*.16;
+    ellipse(sx,sy,2,2,'#e5dcaa');
+  }
+  function cosmicReactor(){
+    pad(592,562,172,65);ellipse(592,546,75,24,'#203b51','#bcd6c7',2);ellipse(592,537,58,17,'#567c84','#c6dfba',1.5);
+    for(const dx of [-52,52]){
+      poly([[592+dx-7,533],[592+dx-5,464],[592+dx,447],[592+dx+7,464],[592+dx+6,533]],'#364e68','#a9b9d9',1.3);
+      line([[592+dx,459],[592+dx,518]],'#9ceadd',2);
+    }
+    glow(592,477,98,'#8cdcd1',.24+flash*.2);glow(592,477,52,'#e5caae',.16);
+    ellipse(592,478,39,39,'#193349','#c2e7dc',1.5);ellipse(592,478,34,34,null,'rgba(226,215,180,.45)',.8);
+    for(let i=0;i<3;i++){
+      const tilt=-.5+i*.5;ctx.beginPath();ctx.ellipse(592,478,66-i*5,17+i*6,tilt,0,Math.PI*2);ctx.strokeStyle=i===1?'#dbcbad':'rgba(167,220,232,.65)';ctx.lineWidth=i===1?1.8:1;ctx.stroke();
+      const a=i*2+(reduced?0:time*.22),px=Math.cos(a)*(66-i*5),py=Math.sin(a)*(17+i*6);
+      ellipse(592+px*Math.cos(tilt)-py*Math.sin(tilt),478+px*Math.sin(tilt)+py*Math.cos(tilt),2.5,2.5,'#fff0ca');
+    }
+    text('∫',590,501,64,'#ecfff1','Georgia, serif','center');
+    for(let i=0;i<9;i++){const a=i/9*Math.PI*2;ellipse(592+Math.cos(a)*64,539+Math.sin(a)*20,1.8,1.8,i%3?'#a9efe2':'#e5cf9a');}
+    text('ПЕРВОИСТОЧНИК',592,591,10,'#dfdfc1','sans-serif','center');
+    if(!shown.total)text('Бесконечность начинается с одной идеи',592,608,10,'#a7c5d3','sans-serif','center');
+  }
+  function cosmicSeal(){
+    const x=600,y=699;
+    line([[x-213,y-5],[x-157,y-5]],'rgba(210,192,151,.48)',1);line([[x+157,y-5],[x+213,y-5]],'rgba(210,192,151,.48)',1);
+    for(const dx of [-221,221])poly([[x+dx,y-9],[x+dx+4,y-5],[x+dx,y-1],[x+dx-4,y-5]],'#d5bd93');
+    text('За гранью бесконечности',x,y,19,'#eee0c3','Georgia, serif','center');
+    text(`Круг вселенных завершён · ${shown.cosmicAscensions}`,x,y+20,10,'#a9c4d2','sans-serif','center');
+  }
   function spaceDust(){
     const p=progress();
     if(cinema&&!cinema.reduced&&p>.35&&p<.84){
       for(let i=0;i<23;i++){const startX=seed(i+482)*W,startY=310+seed(i+593)*450,t=clamp((p-.27-seed(i)*.12)/.44,0,1);const x=startX+(HOLE.x-startX)*t,y=startY+(HOLE.y-startY)*t;glow(x,y,5,tint(81),.3);line([[x+(startX-x)*.06,y+(startY-y)*.06],[x,y]],tint(74,.35),1);}
     }
   }
-  function tree(x,y,size=1,key=0){object(x,y,key+600,()=>{ellipse(x,y+2,16*size,5*size,'rgba(6,26,29,.25)');line([[x,y],[x,y-27*size]],'#675740',5*size);ellipse(x-7*size,y-33*size,15*size,19*size,'#1d4440');ellipse(x+6*size,y-39*size,17*size,21*size,'#346450');ellipse(x,y-53*size,13*size,15*size,'#467355');});}
+  function tree(x,y,size=1,key=0){object(x,y,key+600,()=>{if(shown.cosmicAscensions){crystalTree(x,y,size,key);return;}ellipse(x,y+2,16*size,5*size,'rgba(6,26,29,.25)');line([[x,y],[x,y-27*size]],'#675740',5*size);ellipse(x-7*size,y-33*size,15*size,19*size,'#1d4440');ellipse(x+6*size,y-39*size,17*size,21*size,'#346450');ellipse(x,y-53*size,13*size,15*size,'#467355');});}
   function nature(){
     const trees=[[39,555,1.15],[67,580,.75],[322,604,1.1],[355,622,.8],[743,629,1.1],[778,649,.8],[1068,524,.65],[1163,569,1.1],[84,366,.8],[290,282,.9],[566,379,.75],[812,294,.75],[758,322,.7],[36,643,.95],[475,694,.65]];
     trees.forEach(([x,y,s],i)=>tree(x,y,s,i));
@@ -141,7 +245,15 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     for(let x=W+66,n=0;x<view.right+30&&n<12;x+=105,n++)tree(x,586+seed(x+217)*82,.65+seed(x+323)*.38,x+1200);
     for(const [x,y]of [[311,512],[477,440],[739,558],[779,387],[1038,462]])object(x,y,800+x,()=>{line([[x,y],[x,y-27]],'#213734',3);glow(x,y-31,25,'#f3cf82',.18);rr(x-4,y-38,8,11,3,'#e6c27e','#837459');ellipse(x,y+2,5,2,'#1d3c34');});
   }
-  function pad(x,y,w,h){ellipse(x,y+6,w*.55,h*.52,'rgba(7,27,30,.28)');poly([[x-w/2,y-h/2],[x+w*.39,y-h/2],[x+w/2,y+h*.25],[x-w*.4,y+h/2]],'#5f7666','#92a18b',1);}
+  function pad(x,y,w,h){
+    if(shown.cosmicAscensions){
+      ellipse(x,y+19,w*.6,h*.58,null,'rgba(144,251,233,.35)',1.5);
+      poly([[x-w/2,y-h/2],[x+w/2,y+h*.25],[x+w*.31,y+h*.8],[x,y+h*.54],[x-w*.32,y+h*.78]],'#192440','#796a9a',1);
+      poly([[x-w/2,y-h/2],[x+w*.39,y-h/2],[x+w/2,y+h*.25],[x-w*.4,y+h/2]],'#365566','#b3f4dc',1.5);
+      line([[x-w*.4,y+h/2],[x-w*.25,y+h*.65],[x,y+h*.39]],'#aaffed',1.5);return;
+    }
+    ellipse(x,y+6,w*.55,h*.52,'rgba(7,27,30,.28)');poly([[x-w/2,y-h/2],[x+w*.39,y-h/2],[x+w/2,y+h*.25],[x-w*.4,y+h/2]],'#5f7666','#92a18b',1);
+  }
   function windowPane(x,y,w,h,lit=true){rr(x,y,w,h,Math.min(5,w/3),lit?'#d8c18a':'#24434b','#76928b',1);if(lit)glow(x+w/2,y+h/2,Math.max(w,h),'#edd8a1',.04);line([[x+w/2,y+2],[x+w/2,y+h-2]],'#42544e',1);}
   function school(){
     pad(207,493,262,73);
@@ -231,7 +343,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     const p=progress();
     LOCATIONS.forEach((location,index)=>{
       const unlocked=available(location);object(location.x,location.y,index+1,()=>{
-        if(unlocked)BUILDINGS[index]();
+        if(unlocked){if(shown.cosmicAscensions)cosmicBuilding(location,index);BUILDINGS[index]();}
         else{
           // Fog does not reveal the silhouette, icon, name or type of a future resource.
           for(let cloud=0;cloud<5;cloud++)ellipse(location.x+(cloud-2)*20,location.y-8+(cloud%2)*10,53,28,'rgba(28,53,65,.46)');
@@ -249,6 +361,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     });
   }
   function reactor(){object(HUB.x,HUB.y,29,()=>{
+    if(shown.cosmicAscensions){cosmicReactor();return;}
     pad(592,562,151,61);ellipse(592,548,66,22,'#33564f','#94aa86',2);ellipse(592,539,51,18,'#839983','#b9c8a6');
     glow(592,494,95,tint(65),shown.total?.23:.06+flash*.3);
     const glass=ctx.createLinearGradient(560,0,622,0);glass.addColorStop(0,'#507a7d');glass.addColorStop(.4,'rgba(109,179,182,.14)');glass.addColorStop(1,'#284c60');
@@ -325,15 +438,16 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     if(cinema&&progress()>=.84&&!cinema.revealed){cinema.revealed=true;shown=latest;rebuildActors();particles=[];waves=[];}
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.translate(ox,oy);ctx.scale(scale,scale);
     ctx.save();ctx.beginPath();ctx.rect(view.left,view.top,view.right-view.left,view.bottom-view.top);ctx.clip();sky();landLayer(600,535,.37,.805,terrain);nature();buildings();reactor();drawActors();drawParticles();spaceDust();blackHole();
+    if(shown.cosmicAscensions&&!cinema)cosmicSeal();
     if(cinema){const p=progress();text(p<.22?'Пространство начинает изгибаться…':p<.76?'Идеи возвращаются к истоку':p<.88?'За пределами бесконечности':'Новая вселенная. Новое начало.',600,724,17,'#d8e9e2','Georgia, serif','center');}
     ctx.restore();ctx.setTransform(1,0,0,1,0,0);
   }
-  const canAnimate=()=>!destroyed&&!manualPaused&&!document.hidden&&inView&&!reduced&&(shown.total>0||!!cinema);
+  const canAnimate=()=>!destroyed&&!manualPaused&&!document.hidden&&inView&&!reduced&&(shown.total>0||shown.cosmicAscensions>0||!!cinema);
   function loop(stamp){raf=0;if(!canAnimate())return;const delta=stamp-lastFrame;if(delta>=FRAME_MS-.4){time+=Math.min(delta/1000,.12);lastFrame=stamp;animate();draw();if(cinema&&progress()>=1){finishPrestige();return;}}raf=requestAnimationFrame(loop);}
   function schedule(){if(canAnimate()){if(!raf){lastFrame=performance.now();raf=requestAnimationFrame(loop);}}else if(raf){cancelAnimationFrame(raf);raf=0;}}
   function applyLatest(){shown=latest;rebuildActors();particles=[];waves=[];draw();schedule();}
   function update(state,options={}){
-    if(destroyed)return;const next=snapshot(state,options),changed=next.counts.some((v,i)=>v!==latest.counts[i])||next.hue!==latest.hue||next.prestige!==latest.prestige||next.accent!==latest.accent||next.markers.some((marker,index)=>marker.ready!==latest.markers[index].ready||marker.active!==latest.markers[index].active);latest=next;
+    if(destroyed)return;const next=snapshot(state,options),changed=next.counts.some((v,i)=>v!==latest.counts[i])||next.hue!==latest.hue||next.prestige!==latest.prestige||next.cosmicAscensions!==latest.cosmicAscensions||next.accent!==latest.accent||next.markers.some((marker,index)=>marker.ready!==latest.markers[index].ready||marker.active!==latest.markers[index].active);latest=next;
     if(!cinema&&changed)applyLatest();
   }
   function resize(){if(destroyed)return;const r=canvas.getBoundingClientRect();width=Math.max(1,r.width||W);height=Math.max(1,r.height||H);dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);scale=Math.min(width/W,height/H);ox=(width-W*scale)/2;oy=(height-H*scale)/2;

@@ -2,6 +2,8 @@ import { startEvent, answerEvent, settleEvent } from './events.mjs';
 import { collectAchievements as unlockAchievements } from './achievements.mjs';
 
 export const ECONOMY_VERSION = 2;
+export const PRESTIGE_VERSION = 2;
+export const MAX_PRESTIGE = 100;
 export const MAX_OFFLINE_MS = 12 * 60 * 60 * 1000;
 export const ACTIVE_GRACE_MS = 30_000;
 export const GOLDEN_WINDOW_MS = 15_000;
@@ -62,13 +64,34 @@ const fail=(code,message)=>{throw new EconomyError(code,message);};
 const bounded=value=>Math.min(1e250,Math.max(0,value));
 const schedule=(now,random=Math.random)=>now+90_000+Math.floor(Math.max(0,Math.min(0.99999999,random()))*90_001);
 export function createState(now=Date.now()) {
-  return {version:1,economyVersion:ECONOMY_VERSION,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
+  return {version:1,economyVersion:ECONOMY_VERSION,prestigeVersion:PRESTIGE_VERSION,cosmicAscensions:0,balance:0,totalEarned:0,runEarned:0,clicks:0,generators:GENERATORS.map(()=>0),upgrades:[],achievements:[],achievementRecords:{generators:GENERATORS.map(()=>0),maxGenerators:0,maxUpgrades:0,maxCps:0},activeEvent:null,eventCooldowns:{},eventStats:{wins:0,losses:0},lastEventResult:null,prestige:0,prestigeCount:0,lastSeen:now,lastSettled:now,serverTime:now,offlineEarned:0,golden:{availableUntil:0,nextAt:schedule(now)}};
 }
 // Append the new stage without resetting valid progress, peak records or active stakes.
 // This is a schema migration; callers still validate untrusted imported saves.
 export function migrateState(state) {
   for(const slots of [state.generators,state.achievementRecords?.generators]){
     if(Array.isArray(slots)&&slots.length===10)while(slots.length<GENERATORS.length)slots.push(0);
+  }
+  return state;
+}
+const prestigeLevel=state=>Number.isFinite(state.prestigeCount)?Math.min(MAX_PRESTIGE,Math.max(0,Math.floor(state.prestigeCount))):0;
+// Old points were accidentally derived from a million-integral threshold while
+// the actual reset price is a quadrillion. Completed cycles are the authority.
+export function normalizePrestige(state){
+  state.cosmicAscensions=Number.isSafeInteger(state.cosmicAscensions)&&state.cosmicAscensions>0?state.cosmicAscensions:0;
+  const level=prestigeLevel(state),oldPoints=Number.isFinite(state.prestige)?Math.max(0,state.prestige):0;
+  if(state.prestigeVersion!==PRESTIGE_VERSION||state.prestige!==level||state.prestigeCount!==level){
+    if((oldPoints!==level||state.prestigeCount!==level)&&!state.legacyPrestige){
+      state.legacyPrestige={points:state.prestige,count:state.prestigeCount};
+    }
+    const oldMultiplier=1+oldPoints*.1,newMultiplier=1+level*.1;
+    // A challenge already in flight must not retain its old runaway multiplier.
+    // Both rewards and penalties depend linearly on that multiplier.
+    if(oldMultiplier>newMultiplier&&state.activeEvent){
+      const ratio=newMultiplier/oldMultiplier;
+      for(const key of ['reward','penalty'])if(Number.isFinite(state.activeEvent[key]))state.activeEvent[key]*=ratio;
+    }
+    state.prestige=level;state.prestigeCount=level;state.prestigeVersion=PRESTIGE_VERSION;
   }
   return state;
 }
@@ -82,7 +105,7 @@ export function upgradeAvailable(state,u){
   return u.requirement.type==='clicks'?state.clicks>=u.requirement.amount:state.generators[GENERATORS.findIndex(g=>g.id===u.requirement.itemId)]>=u.requirement.amount;
 }
 export function getStats(state) {
-  const multiplier=1+state.prestige*0.1,owned=new Set(state.upgrades);
+  const multiplier=1+prestigeLevel(state)*0.1,owned=new Set(state.upgrades);
   let flatClickPower=1,clickProductionShare=BASE_CLICK_PRODUCTION_SHARE;
   const rawRates=GENERATORS.map((g,i)=>g.baseCps*(state.generators[i]??0));
   const teamworkShares=GENERATORS.map(()=>0);
@@ -110,7 +133,7 @@ export function getStats(state) {
     const totalCps=bounded(directCps+teamworkCps);
     return {id:g.id,count,directCps,teamworkCps,teamworkBonus:teamworkShares[i],totalCps,unitCps:count?totalCps/count:g.baseCps*multiplier};
   });
-  return {cps,clickPower:bounded(flatClickPower+cps*clickProductionShare),multiplier,prestigeGain:Math.floor(Math.sqrt(state.runEarned/1_000_000)),
+  return {cps,clickPower:bounded(flatClickPower+cps*clickProductionShare),multiplier,prestigeGain:prestigeLevel(state)<MAX_PRESTIGE?1:0,
     baseCps,flatClickPower,clickProductionShare,teamworkBonus,generatorRates};
 }
 function credit(state,value){const safe=bounded(value);state.balance=bounded(state.balance+safe);state.totalEarned=bounded(state.totalEarned+safe);state.runEarned=bounded(state.runEarned+safe);return safe;}
@@ -129,7 +152,7 @@ function previousEconomyCps(state){
 }
 export function settle(state,now=Date.now()) {
   if(!Number.isFinite(now))fail('invalid_time','Некорректное время.');
-  migrateState(state);
+  migrateState(state);normalizePrestige(state);
   const until=Math.max(state.lastSettled,now),from=state.lastSettled;
   const activeEnd=state.lastSeen+ACTIVE_GRACE_MS;
   const activeMs=Math.max(0,Math.min(until,activeEnd)-from);
@@ -176,11 +199,17 @@ export function applyAction(state,action,now=Date.now()) {
   if(action.type==='prestige'){
     if(state.activeEvent)fail('event_active','Заверши испытание перед перерождением.');
     if(state.balance<PRESTIGE_PRICE)fail('prestige_locked','Для перерождения нужно 999 999 999 999 999 интегралов на балансе.');
-    const gain=getStats(state).prestigeGain;
-    if(gain<1)fail('prestige_locked','Для первого престижа нужен миллион интегралов за цикл.');
-    state.prestige+=gain;state.prestigeCount++;
+    const gain=getStats(state).prestigeGain,cosmicAscension=state.prestigeCount===MAX_PRESTIGE;
+    if(cosmicAscension&&action.confirmCosmicReset!==true)fail('cosmic_confirmation_required','Обновите игру и подтвердите сброс рейтинга при переходе со 100-го престижа.');
+    if(cosmicAscension){
+      // Finishing the hundredth universe starts a new ranking run. The award
+      // belongs to the account and survives this and all subsequent resets.
+      state.cosmicAscensions=Math.min(Number.MAX_SAFE_INTEGER,state.cosmicAscensions+1);
+      state.totalEarned=0;state.prestigeCount=0;state.lastEventResult=null;
+    }else state.prestigeCount++;
+    state.prestige=state.prestigeCount;
     if(Number.isSafeInteger(state.prestigeCount)&&state.prestigeCount>0){const honor=`prestige:${state.prestigeCount}`;if(!state.achievements.includes(honor))state.achievements.push(honor);}
-    state.balance=0;state.runEarned=0;state.generators=GENERATORS.map(()=>0);state.upgrades=[];state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'prestige',prestigeGain:gain});
+    state.balance=0;state.runEarned=0;state.offlineEarned=0;state.generators=GENERATORS.map(()=>0);state.upgrades=[];state.golden={availableUntil:0,nextAt:schedule(now)};return finished(state,{type:'prestige',prestigeGain:gain,cosmicAscension});
   }
   if(action.type==='golden'){
     if(state.golden.availableUntil<=0||now>state.golden.availableUntil||now<state.golden.nextAt)fail('golden_unavailable','Золотой интеграл сейчас недоступен.');

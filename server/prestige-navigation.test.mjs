@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createContext,Script} from 'node:vm';
-import {createState,getStats,applyAction,PRESTIGE_PRICE} from '../shared/economy.mjs';
-import {prestigeAppearance} from '../shared/achievements.mjs';
+import {createState,getStats,applyAction,PRESTIGE_PRICE,MAX_PRESTIGE,PRESTIGE_VERSION,GENERATORS,UPGRADES,migrateState,normalizePrestige} from '../shared/economy.mjs';
+import {prestigeAppearance,ACHIEVEMENTS} from '../shared/achievements.mjs';
+import {EVENTS} from '../shared/events.mjs';
 
 const app=readFileSync(new URL('../app.mjs',import.meta.url),'utf8');
 
@@ -35,11 +36,13 @@ const source=[declaration('openPrestige'),
 function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
 
 function harness({decision=async()=>true,animation=Promise.resolve()}={}){
-  const calls=[],elements=new Map(),snapshots=[];let context;
+  const calls=[],elements=new Map(),snapshots=[],toasts=[],actions=[];let context;
   const state=createState(1000);state.balance=PRESTIGE_PRICE+1000;state.runEarned=4e6;state.totalEarned=5e6;
   state.generators[0]=4;state.generators[1]=2;state.upgrades=['click-1'];state.achievements=['first'];
   function element(selector){
-    if(!elements.has(selector))elements.set(selector,{hidden:false,disabled:false,open:false,checked:true,innerHTML:'',textContent:'',events:new Map(),
+    if(!elements.has(selector))elements.set(selector,{hidden:false,disabled:false,open:false,checked:true,innerHTML:'',textContent:'',events:new Map(),dataset:{},classes:new Set(),
+      classList:{toggle(name,enabled){const classes=elements.get(selector).classes;if(enabled)classes.add(name);else classes.delete(name);}},
+      setAttribute(name,value){this[name]=value;},style:{setProperty(){}},
       showModal(){this.open=true;calls.push('dialog:open');},
       close(){this.open=false;calls.push('dialog:close');},
       focus(){this.focused=true;},
@@ -52,14 +55,14 @@ function harness({decision=async()=>true,animation=Promise.resolve()}={}){
     state,currentPage:'lab',prestigeSubmitting:false,readOnlyTab:false,
     cinematicActive:false,cinematicSound:true,selectedCosmetic:'classic',prestigePage:0,
     appearance:prestigeAppearance(0),musicVolume:20,musicEnabled:true,resumeMusicAfterVisibility:false,
-    PRESTIGE_PRICE,getStats,prestigeAppearance,structuredClone,$:element,
+    PRESTIGE_PRICE,MAX_PRESTIGE,getStats,prestigeAppearance,structuredClone,$:element,
     projected:()=>context.state,fmt:value=>String(value),esc:value=>String(value),
     showReadOnlyNotice(){calls.push('read-only');},
-    save(){calls.push('save');},render(){calls.push('render');},toast(){calls.push('toast');},
+    save(){calls.push('save');},render(){calls.push('render');},toast(message){calls.push('toast');toasts.push(message);},
     setCinematicUI(active){context.cinematicActive=active;calls.push(`cinematic:${active}`);},
     showPage(page){context.currentPage=page;calls.push(`show:${page}`);},
     async act(action){
-      calls.push('act');assert.equal(action.type,'prestige');
+      calls.push('act');actions.push(structuredClone(action));assert.equal(action.type,'prestige');
       const accepted=await decision();
       if(accepted){applyAction(context.state,action,1000);calls.push('accepted');}
       return accepted;
@@ -79,7 +82,7 @@ function harness({decision=async()=>true,animation=Promise.resolve()}={}){
     const handler=element(selector).events.get('click');assert.ok(handler,selector);
     return handler();
   };
-  return {context,element,fire,calls,snapshots};
+  return {context,element,fire,calls,snapshots,toasts,actions};
 }
 
 test('opening the black hole and the first confirmation stay in the laboratory without an action or animation',()=>{
@@ -117,6 +120,7 @@ test('only the accepted second confirmation opens the world, then plays the prev
   assert.equal(JSON.stringify(h.snapshots[0].state),JSON.stringify(before),'the cinematic receives the intact old world');
   assert.notEqual(h.snapshots[0].state,h.context.state);
   assert.equal(h.context.state.balance,0);assert.equal(h.context.state.prestigeCount,1);
+  assert.deepEqual(h.actions,[{type:'prestige'}],'an ordinary reset never sends cosmic reset consent');
   assert.ok(h.context.state.generators.every(count=>count===0));
   assert.equal(h.snapshots[1].next.prestigeCount,1,'the world is updated to the accepted new epoch');
   assert.equal(h.context.prestigeSubmitting,true);
@@ -145,4 +149,78 @@ test('a refused or failed prestige leaves the current world, account and theme i
     assert.equal(h.snapshots.length,0);assert.equal(h.context.prestigeSubmitting,false);
     assert.equal(h.context.cinematicActive,false);assert.equal(h.element('#prestige-final-confirm').disabled,false);
   }
+});
+
+
+test('the paid transition from prestige 100 clearly warns twice, resets rating, and keeps its permanent world award',async()=>{
+  const h=harness();h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE;
+  h.context.state.totalEarned=PRESTIGE_PRICE*50;
+  h.context.state.balance=PRESTIGE_PRICE-1;h.context.openPrestige();
+  assert.equal(h.element('#prestige-confirm').disabled,true,'level 100 still requires the full purchase price');
+  assert.match(h.element('#prestige-cost-warning').innerHTML,/мировом рейтинге обнулятся/);
+  assert.match(h.element('#prestige-details').innerHTML,/0 \/ 100/);
+  assert.match(h.element('#prestige-details').innerHTML,/>×11</);
+  assert.match(h.element('#prestige-details').innerHTML,/>×1</);
+  assert.match(h.element('#prestige-details').innerHTML,/Постоянная награда/);
+  assert.doesNotMatch(h.element('#prestige-details').innerHTML,/\+0 уровень|prestige:101/);
+  h.context.state.balance=PRESTIGE_PRICE+500;h.context.openPrestige();
+  assert.equal(h.element('#prestige-confirm').disabled,false,'zero prestigeGain does not block the final cycle');
+  assert.match(h.element('#prestige-final-warning').textContent,/мировом рейтинге станут нулевыми/);
+  assert.match(h.element('#prestige-final-confirm').textContent,/обнулить рейтинг/);
+  h.fire('#prestige-confirm');
+  assert.equal(h.context.currentPage,'lab');assert.equal(h.calls.includes('act'),false);
+  await h.fire('#prestige-final-confirm');
+  assert.equal(h.context.currentPage,'world');assert.equal(h.context.state.totalEarned,0);
+  assert.deepEqual(h.actions,[{type:'prestige',confirmCosmicReset:true}],'only the second confirmation sends explicit consent to reset the ranking');
+  assert.equal(h.context.state.prestigeCount,0);assert.equal(h.context.state.prestige,0);
+  assert.equal(h.context.state.cosmicAscensions,1);assert.equal(h.context.prestigePage,0);
+  assert.equal(h.context.selectedCosmetic,'classic');assert.equal(h.calls.filter(call=>call==='play').length,1);
+  assert.equal(h.snapshots[1].next.cosmicAscensions,1,'the new world receives permanent ownership immediately');
+  assert.match(h.toasts.at(-1),/особый мир открыт навсегда/);
+  assert.doesNotMatch(h.toasts.at(-1),/Перерождение №0|\+0/);
+  assert.ok(h.context.state.achievements.includes('first'));
+});
+
+test('level 100 remains a purchasable final cycle while the god emblem requires actual permanent ownership',()=>{
+  const h=harness(),avatar=h.element('avatar');
+  h.context.emoji='🧪';h.context.$$=()=>[avatar];
+  const mark=app.slice(app.indexOf('const blackHoleOwnerMark='),app.indexOf('\nfunction renderProfileFrame'));
+  new Script(mark+'\n'+declaration('renderProfileFrame')+'\n'+declaration('renderPrestigeResource')).runInContext(h.context);
+  h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE;
+  h.context.renderProfileFrame(h.context.state);h.context.renderPrestigeResource(h.context.state);
+  assert.equal(h.element('#prestige-open').disabled,false);
+  assert.ok(h.element('#prestige-open').classes.has('affordable'));
+  assert.match(h.element('#prestige-resource-note').textContent,/Рейтинг и престиж → 0/);
+  assert.equal(avatar.classes.has('prestige-god'),false);assert.doesNotMatch(avatar.innerHTML,/<svg/);
+  h.context.state.cosmicAscensions=1;h.context.state.prestige=h.context.state.prestigeCount=0;
+  h.context.renderProfileFrame(h.context.state);h.context.renderPrestigeResource(h.context.state);
+  assert.ok(avatar.classes.has('prestige-god'));assert.ok(avatar.classes.has('prestige-avatar'));
+  assert.match(avatar.innerHTML,/<svg/);assert.match(h.element('#profile-button')['aria-label'],/Владыка чёрной дыры/);
+  assert.equal(h.element('#prestige-open').disabled,false,'a new cycle may start after obtaining the permanent award');
+});
+
+
+test('restoring a local save preserves completed cosmic cycles and the archived legacy prestige',()=>{
+  const context=createContext({createState,PRESTIGE_VERSION,GENERATORS,UPGRADES,migrateState,normalizePrestige,ACHIEVEMENTS,EVENTS});
+  new Script(declaration('validAchievement')+'\n'+declaration('validateState')).runInContext(context);
+  const saved=createState();saved.cosmicAscensions=2;saved.legacyPrestige={points:75000,count:120};
+  const restored=context.validateState(saved);
+  assert.equal(restored.cosmicAscensions,2);assert.equal(restored.prestigeCount,0);
+  assert.equal(JSON.stringify(restored.legacyPrestige),JSON.stringify(saved.legacyPrestige));
+  assert.equal(restored.prestigeVersion,PRESTIGE_VERSION);
+  const old=createState();delete old.prestigeVersion;old.prestige=75000;old.prestigeCount=120;
+  const migrated=context.validateState(old);
+  assert.equal(migrated.prestigeCount,MAX_PRESTIGE);assert.equal(migrated.cosmicAscensions,0,'the old cap alone does not grant the permanent reward');
+});
+
+
+test('a level change between confirmations requires showing the new destructive terms before sending consent',async()=>{
+  const h=harness();h.context.state.prestige=h.context.state.prestigeCount=99;
+  h.context.openPrestige();h.fire('#prestige-confirm');
+  h.context.state.prestige=h.context.state.prestigeCount=MAX_PRESTIGE;
+  await h.fire('#prestige-final-confirm');
+  assert.equal(h.actions.length,0);assert.equal(h.calls.includes('play'),false);
+  assert.equal(h.context.currentPage,'lab');assert.equal(h.element('#prestige-step-one').hidden,false);
+  assert.match(h.element('#prestige-cost-warning').innerHTML,/мировом рейтинге обнулятся/);
+  assert.equal(h.context.prestigeSubmitting,false);
 });

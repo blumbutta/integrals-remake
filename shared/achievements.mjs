@@ -116,7 +116,7 @@ const PRESTIGE_DIRECTIONS=[
 export function prestigeAppearance(value){
   const count=normalizeCount(value);
   if(count===0)return {id:'classic',name:COSMETICS[0].name,achievementTitle:'Первое начало',...COSMETICS[0].colors,pattern:'classic',hue:16,rings:3,rotation:0,frequency:3,variant:'0',run:0};
-  const direction=PRESTIGE_DIRECTIONS[count-1]||{name:`Спектр бесконечности · ${count}`,pattern:PRESTIGE_DIRECTIONS[(count-1)%PRESTIGE_DIRECTIONS.length].pattern};
+  const direction=count===100?{name:'Владыка чёрной дыры',pattern:'rings',hue:45}:PRESTIGE_DIRECTIONS[count-1]||{name:`Спектр бесконечности · ${count}`,pattern:PRESTIGE_DIRECTIONS[(count-1)%PRESTIGE_DIRECTIONS.length].pattern};
   // A golden-angle rotation avoids repeating a small fixed colour cycle.
   const hue=direction.hue??((count*137.50776405003785)%360);
   return {id:`prestige:${count}`,name:direction.name,achievementTitle:`Перерождение №${count} · ${direction.name}`,accent:`hsl(${hue} 82% 72%)`,tint:`hsl(${hue} 42% 10%)`,glow:`hsl(${(hue+37)%360} 88% 70% / .35)`,pattern:direction.pattern,hue,rings:3+(count%11),rotation:(count*17.32050807568877)%360,frequency:3+(count%17),variant:count.toString(36),run:count};

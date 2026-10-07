@@ -63,7 +63,7 @@ test('new stage has all four milestones and completing 26 research items has a s
 
 test('each legitimate prestige awards its own badge, independently of points gained',()=>{
   const state=createState(0);state.runEarned=4e6;state.totalEarned=4e6;state.balance=PRESTIGE_PRICE;
-  applyAction(state,{type:'prestige'},0);assert.equal(state.prestige,2);assert.equal(state.prestigeCount,1);assert.ok(state.achievements.includes('prestige:1'));assert.ok(!state.achievements.includes('prestige:2'));
+  applyAction(state,{type:'prestige'},0);assert.equal(state.prestige,1);assert.equal(state.prestigeCount,1);assert.ok(state.achievements.includes('prestige:1'));assert.ok(!state.achievements.includes('prestige:2'));
   state.runEarned=1e6;state.totalEarned+=1e6;state.balance=PRESTIGE_PRICE;applyAction(state,{type:'prestige'},0);
   assert.equal(state.prestigeCount,2);assert.ok(state.achievements.includes('prestige:2'));assert.ok(state.achievements.includes('prestige-runs-2'));
 });

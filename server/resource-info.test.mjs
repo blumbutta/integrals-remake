@@ -16,7 +16,7 @@ test('resource mystery opens at its price and survives spending, bulk selection 
   assert.equal(resourceDiscovered(s,1),false);
 });
 test('resource details include effective rates, total share and only unlocked research',()=>{
-  const s=createState();s.totalEarned=1e9;s.prestige=5;s.generators[1]=10;s.generators[2]=1;s.upgrades=['abacus-1'];
+  const s=createState();s.totalEarned=1e9;s.prestige=s.prestigeCount=5;s.generators[1]=10;s.generators[2]=1;s.upgrades=['abacus-1'];
   const info=resourceInfo(s,'abacus',10);
   assert.equal(info.count,10);assert.equal(info.amount,10);
   assert.equal(info.unitCps,2*2*1.5);assert.equal(info.totalCps,60);

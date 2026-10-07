@@ -85,7 +85,7 @@ test('both stakes remain fixed when production changes during a challenge',()=>{
   const state=createState(0);state.generators[1]=1;state.balance=1000;
   applyAction(state,{type:'event_start',itemId:'school'},0);const active=state.activeEvent;
   assert.equal(active.reward,60);assert.equal(active.penalty,60);
-  state.generators[10]=1;state.prestige=10;
+  state.generators[10]=1;state.prestige=state.prestigeCount=10;
   const wrong=active._answers.map((value,i)=>(value+1)%active.prompts[i].options.length);
   applyAction(state,{type:'event_answer',itemId:active.id,answers:wrong},0);
   assert.equal(state.balance,940);assert.equal(state.lastEventResult.penalty,60);assert.equal(state.totalEarned,0);

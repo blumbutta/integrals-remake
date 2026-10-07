@@ -145,3 +145,46 @@ test('the landscape fills wide and tall canvases while all landmark click target
     for(const [id,x,y]of targets){const cx=ox+x*sx,cy=oy+y*sy;assert.ok(cx>=0&&cx<=size.width&&cy>=0&&cy<=size.height);mock.click(cx,cy);assert.equal(locations.at(-1),id);}
   }
 });
+
+test('a completed cosmic cycle changes the empty world without revealing future inhabitants or events',t=>{
+  const mock=browser(t),locations=[],world=mock.world({onLocation:value=>locations.push(value)});
+  for(const cosmicAscensions of [undefined,-1,Infinity,NaN]){
+    mock.clear();world.update({...newWorld(),cosmicAscensions});world.resize();
+    assert.equal(mock.labels.includes('За гранью бесконечности'),false,'invalid or missing reward counters keep the ordinary world');
+  }
+  const fresh={...newWorld(),prestige:0,cosmicAscensions:1},unchanged=structuredClone(fresh);
+  mock.clear();world.update(fresh);
+  assert.ok(mock.labels.includes('За гранью бесконечности'));
+  assert.ok(mock.paint.some(p=>p.color==='#284354'),'the new suspended continent has its own geometry');
+  assert.equal(mock.paint.some(p=>p.color==='#244944'),false,'ordinary ground is replaced, not just tinted');
+  assert.equal(mock.portraitCount,0);
+  for(const name of ['Школа','Университет','Портальные острова','Орбитальный сверхразум'])assert.equal(mock.labels.includes(name),false);
+  mock.click(238,191);assert.deepEqual(locations.at(-1),{id:'orbitalmind',name:'Неизвестный район',unlocked:false,generatorIndices:[]});
+  assert.ok(mock.frames.size>0,'the reward remains alive immediately after the zero-resource reset');
+  assert.deepEqual(fresh,unchanged,'rendering does not alter saved progress');
+  mock.clear();world.update({...fresh,cosmicAscensions:2});
+  assert.ok(mock.labels.includes('Круг вселенных завершён · 2'),'a reward-counter-only update redraws the world');
+  const discovered={...fresh,generators:[0,1,...Array(9).fill(0)]};mock.clear();world.update(discovered);
+  assert.ok(mock.labels.includes('Школа'));assert.equal(mock.labels.includes('Университет'),false);
+  mock.reduce();assert.equal(mock.frames.size,0,'reduced motion suspends cosmic animation');
+  assert.ok(mock.labels.includes('За гранью бесконечности'),'the static reward remains visible with reduced motion');
+});
+
+test('the century reset reveals the cosmic world after absorption and keeps it through later prestige resets',async t=>{
+  const mock=browser(t),world=mock.world(),old={...oldWorld(),prestige:100,cosmicAscensions:0},fresh={...newWorld(),prestige:0,cosmicAscensions:1};
+  world.update(old);const animation=world.playPrestige({state:old,durationMs:6500});world.update(fresh);
+  mock.clear();mock.frameAt(6500*.62);
+  assert.ok(mock.paint.some(p=>p.color==='#244944'));
+  assert.equal(mock.paint.some(p=>p.color==='#284354'),false,'reward geometry is buffered until the reveal');
+  mock.clear();mock.frameAt(6500*.93);
+  assert.ok(mock.paint.some(p=>p.color==='#284354'));
+  assert.equal(mock.portraitCount,0);assert.equal(mock.labels.includes('За гранью бесконечности'),false,'the trophy does not overlap cinematic text');
+  mock.clear();mock.frameAt(6500);await animation;
+  assert.ok(mock.labels.includes('За гранью бесконечности'));
+  world.update({...oldWorld(),cosmicAscensions:1});
+  const nextAnimation=world.playPrestige({state:{...oldWorld(),cosmicAscensions:1}});world.update({...fresh,prestige:1});
+  mock.clear();world.finishPrestige();await nextAnimation;
+  assert.ok(mock.labels.includes('За гранью бесконечности'),'ordinary later resets retain the permanent world');
+  assert.ok(mock.frames.size>0);mock.document.hidden=true;mock.document.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(mock.frames.size,0,'a hidden rewarded world does not keep animating');
+});

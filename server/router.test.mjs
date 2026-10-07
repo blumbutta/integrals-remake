@@ -93,7 +93,7 @@ test('profile creation, durable recovery after reopen, hash-only storage and pub
     const action=await f.request(p+'/action','POST',{id:actionId(1),type:'click',amount:20},token);
     assert.equal(action.data.player.totalEarned,20);
     const rating=await f.request(p+'/leaderboard');
-    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['balance','emoji','id','nickname','prestige','rank','totalEarned']);
+    assert.deepEqual(Object.keys(rating.data.entries[0]).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','totalEarned']);
     assert.equal(rating.data.entries[0].id,publicId);assert.ok(!JSON.stringify(rating.data).includes(token));
     const hide=await f.request(p+'/profile','PATCH',{listed:false},token);assert.equal(hide.data.player.listed,false);
     assert.equal((await f.request(p+'/leaderboard')).data.entries.length,0);
@@ -175,11 +175,11 @@ test('leaderboard reports separate current balance, lifetime score, prestige, em
     state.prestige=7;db.prepare('UPDATE integrals_players SET state=?,prestige=? WHERE id=?').run(JSON.stringify(state),7,row.id);db.close();
     const rating=(await f.request(p+'/leaderboard')).data;
     assert.deepEqual(rating.entries,[
-      {id:first.player.id,nickname:'Первый',emoji:'🚀',totalEarned:20,balance:5,prestige:0,rank:1},
-      {id:second.player.id,nickname:'Второй',emoji:'🤖',totalEarned:19,balance:19,prestige:7,rank:2},
+      {id:first.player.id,nickname:'Первый',emoji:'🚀',totalEarned:20,balance:5,prestige:0,cosmicAscensions:0,rank:1},
+      {id:second.player.id,nickname:'Второй',emoji:'🤖',totalEarned:19,balance:19,prestige:7,cosmicAscensions:0,rank:2},
     ]);
     assert.ok(!JSON.stringify(rating).includes(first.token));assert.ok(!JSON.stringify(rating).includes(second.token));
-    for(const entry of rating.entries)assert.deepEqual(Object.keys(entry).sort(),['balance','emoji','id','nickname','prestige','rank','totalEarned']);
+    for(const entry of rating.entries)assert.deepEqual(Object.keys(entry).sort(),['balance','cosmicAscensions','emoji','id','nickname','prestige','rank','totalEarned']);
     await f.request(p+'/profile','PATCH',{listed:false},first.token);
     const hidden=(await f.request(p+'/leaderboard')).data.entries;assert.equal(hidden.length,1);assert.equal(hidden[0].id,second.player.id);assert.equal(hidden[0].rank,1);
   }finally{await f.close();}
@@ -187,7 +187,7 @@ test('leaderboard reports separate current balance, lifetime score, prestige, em
 test('old database receives an additive emoji migration and recovery, receipts and selected emoji survive restart',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'integrals-legacy-')),dbPath=join(dir,'old.sqlite'),t=1_000_000;
   const token='ir_'+'b'.repeat(43),tokenHash=createHash('sha256').update(token).digest('hex'),publicId='b1b4ec24-4ca0-4a52-aac3-727940ae9556';
-  const legacy=createState(t);legacy.balance=73.5;legacy.totalEarned=12345;legacy.runEarned=345;legacy.prestige=7;legacy.prestigeCount=2;legacy.clicks=5;
+  const legacy=createState(t);legacy.balance=73.5;legacy.totalEarned=12345;legacy.runEarned=345;legacy.prestige=7;legacy.prestigeCount=7;legacy.clicks=5;
   const replay={id:actionId(70),type:'click',amount:5};
   const db=new DatabaseSync(dbPath);
   db.exec(`CREATE TABLE integrals_players (
@@ -214,7 +214,7 @@ test('old database receives an additive emoji migration and recovery, receipts a
     await f.close();f=await fixture({dbPath});
     const reopened=(await f.request(p+'/state','GET',undefined,token)).data.player;
     assert.equal(reopened.emoji,'⚛️');assert.equal(reopened.id,publicId);assert.equal(reopened.nickname,'Прежний профиль');assert.equal(reopened.totalEarned,12345);assert.equal(reopened.balance,73.5);assert.equal(reopened.prestige,7);
-    const rating=(await f.request(p+'/leaderboard')).data;assert.deepEqual(rating.entries,[{id:publicId,nickname:'Прежний профиль',emoji:'⚛️',totalEarned:12345,balance:73.5,prestige:7,rank:1}]);
+    const rating=(await f.request(p+'/leaderboard')).data;assert.deepEqual(rating.entries,[{id:publicId,nickname:'Прежний профиль',emoji:'⚛️',totalEarned:12345,balance:73.5,prestige:7,cosmicAscensions:0,rank:1}]);
     assert.ok(!JSON.stringify(rating).includes(token));assert.ok(!JSON.stringify(rating).includes(tokenHash));
     const persisted=new DatabaseSync(dbPath);assert.equal(persisted.prepare('PRAGMA table_info(integrals_players)').all().filter(column=>column.name==='emoji').length,1);assert.equal(persisted.prepare('SELECT token_hash FROM integrals_players WHERE id=42').get().token_hash,tokenHash);persisted.close();
   }finally{if(f?.server.listening)await f.close();rmSync(dir,{recursive:true,force:true});}
