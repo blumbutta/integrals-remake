@@ -1,0 +1,119 @@
+/* Keep the three work areas independent and the shared information in view. */
+:root{--credits-space:48px;--topbar-height:76px}
+.footer{position:fixed;z-index:1201;inset:auto 0 0;min-height:0;padding:9px 18px;gap:8px 18px;font:13px/1.5 Arial,sans-serif;align-items:center;background:#101820 url('./assets/original/darkNoise.png')}
+.footer .credits,.footer .credits span,.footer .credits a,.footer .other-games a{font-size:13px;line-height:1.5}
+.footer .credits{flex:1;text-align:center}.footer .other-games{display:flex;gap:14px;white-space:nowrap}
+.statistics-panel.statistics-dock{bottom:var(--credits-space);padding-bottom:0}
+.statistics-panel .lab-stats{min-height:76px}
+.statistics-panel .lab-stats>div{padding:10px 9px}
+.statistics-panel .lab-stats span{font-size:13px;line-height:1.35;margin-bottom:5px}
+.statistics-panel .lab-stats strong{font-size:25px;line-height:1.2}
+#prestige-open.prestige-resource{display:flex;position:relative;min-height:104px;gap:10px;padding:14px 10px;overflow:hidden;border:1px solid #dec085;background:radial-gradient(ellipse at 4% 50%,#78543265,transparent 55%),linear-gradient(125deg,#201c30,#102337);box-shadow:inset 0 0 0 2px #e8c28024,0 0 14px #cdaa6017}
+#prestige-open.prestige-resource:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(120deg,transparent 20%,#ffdda40b 50%,transparent 80%)}
+#prestige-open .black-hole{width:56px;height:64px;flex:0 0 56px;margin:0;float:none;transform:none}
+#prestige-open .generator-info h3{color:#f4dfae;font-size:20px}
+#prestige-open .generator-info p{font-size:12px;line-height:1.5;color:#d3c6b3}
+#prestige-open .generator-info small{font-size:11px;color:#a5b9c4}
+#prestige-open .generator-meta{max-width:40%;min-width:0}
+#prestige-open .generator-meta strong{color:#d5c1a0;font-size:13px;white-space:normal;overflow-wrap:normal}
+#prestige-open.affordable{border-color:#ffe4a0;box-shadow:inset 0 0 24px #e7ba5330,0 0 14px #e8c06b35}
+#prestige-open.affordable .generator-meta strong{color:#ffe3a3}
+#prestige-badge{font:12px Arial,sans-serif;color:#d5b8ff}
+#generators-panel,#upgrades-panel{scrollbar-gutter:stable}
+.form-error{color:#ffc2ab!important;font:15px/1.5 Arial,sans-serif;min-height:0}
+.form-error:empty{display:none}.welcome-modal{max-width:550px}
+.welcome-modal h2{font-size:32px;line-height:1.2}.welcome-modal p{font-size:15px;line-height:1.6}
+.welcome-modal select{display:block;min-height:46px;width:100%;padding:6px 12px;margin-bottom:20px;font-size:25px;background:#153648;color:#f1ebd6;border:1px solid #abc2c66b;border-radius:5px}
+.welcome-modal .field-label{font-size:15px;margin-top:18px}.welcome-modal input{font-size:18px}
+.welcome-modal .primary-button,.welcome-modal .secondary-button{width:100%;margin-top:10px;min-height:46px;font-size:15px}
+.welcome-recovery{margin-top:24px;border-top:1px solid #c6d2c240;padding-top:18px;font:15px/1.6 Arial,sans-serif}
+/* A floating, catchable symbol. Motion stops while it is being targeted. */
+#golden-button.golden-flight{position:fixed;z-index:1300;left:4vw;top:calc(var(--topbar-height) + 35px);display:grid;place-items:center;width:88px;height:100px;min-width:0;margin:0;padding:0;border:0;border-radius:50%;background:radial-gradient(ellipse,#fff6b839,#ffd16911 54%,transparent 73%);color:#ffe290;cursor:pointer;filter:drop-shadow(0 0 13px #ffbf38a0);animation:golden-flight 15s linear both;transform-origin:center;touch-action:manipulation}
+#golden-button.golden-flight[hidden]{display:none!important}
+.golden-symbol{font:italic 82px/1 Georgia,serif;text-shadow:0 0 3px #fff6cd,0 2px 0 #98712b,0 0 19px #ffc44a}
+.golden-orbit{position:absolute;inset:9px;border:1px solid #f9d16c80;border-radius:50%;transform:rotate(-25deg) scaleY(.65);box-shadow:0 0 16px #ffd05960}
+.golden-spark{position:absolute;right:5px;top:10px;font-size:20px;color:#fff6c8}
+#golden-button:hover,#golden-button:focus-visible{animation-play-state:paused;outline:2px solid #ffecad;outline-offset:3px}
+@keyframes golden-flight{0%{transform:translate(0,5vh) rotate(-8deg)}25%{transform:translate(23vw,calc((100dvh - var(--topbar-height) - var(--statistics-space) - 150px)*.6)) rotate(6deg)}55%{transform:translate(50vw,5vh) rotate(-5deg)}80%{transform:translate(73vw,calc((100dvh - var(--topbar-height) - var(--statistics-space) - 150px)*.75)) rotate(8deg)}100%{transform:translate(78vw,9vh) rotate(-5deg)}}
+/* Dense achievement cards keep their labels and earned/unearned sections. */
+.achievement-group-grid{grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.achievements-page .achievement-card{grid-template-columns:46px minmax(0,1fr);gap:12px;min-height:0;padding:15px 13px;align-items:center}
+.achievements-page .achievement-emblem,.achievements-page .achievement-art{width:46px;height:52px;margin:0}
+.achievements-page .achievement-emblem svg,.achievements-page .achievement-art svg{width:100%;height:100%}
+.achievement-card .achievement-copy h3{font-size:18px;line-height:1.25;margin:3px 0 7px}
+.achievement-card .achievement-copy p{font-size:13px;line-height:1.45;margin:0}
+.achievement-card .achievement-copy small{font-size:11px;line-height:1.4;margin-top:6px}
+.achievement-card .achievement-state{font-size:10px;line-height:1.2;letter-spacing:.25px}
+.achievement-card.unlocked .achievement-copy>small{display:none}
+.achievement-card .progress-track{margin-top:9px;height:4px}
+.achievement-section{margin-top:22px}.achievement-section>header{margin-bottom:12px}
+.achievement-section>header h2{font-size:25px}.achievement-filters{position:sticky;top:0;z-index:2;background:#112f41f5;padding-top:10px;padding-bottom:10px}
+/* Extra rewards have distinct patterns as well as colours. */
+body[data-pattern="parchment"]:before{background:repeating-linear-gradient(0deg,transparent 0 34px,#fde7bb 35px,transparent 36px)}
+body[data-pattern="ink"]:before{background:radial-gradient(ellipse at 25% 40%,#616caf 0,transparent 55%),repeating-linear-gradient(145deg,transparent 0 70px,#a1afea 71px,transparent 72px)}
+body[data-pattern="honeycomb"]:before{background:repeating-linear-gradient(60deg,transparent 0 48px,var(--accent) 49px,transparent 50px),repeating-linear-gradient(-60deg,transparent 0 48px,var(--accent) 49px,transparent 50px)}
+body[data-pattern="circuit"]:before{background:repeating-linear-gradient(90deg,transparent 0 78px,var(--accent) 79px,transparent 80px),repeating-linear-gradient(0deg,transparent 0 39px,var(--accent) 40px,transparent 41px)}
+body[data-pattern="constellations"]:before{background:radial-gradient(circle at 20px 30px,var(--accent) 0 2px,transparent 3px) 0 0/100px 120px,radial-gradient(circle at 55px 70px,#fff7cf 0 1px,transparent 2px) 0 0/160px 130px}
+body[data-pattern="diamonds"]:before{background:repeating-linear-gradient(45deg,transparent 0 60px,var(--accent) 61px,transparent 62px),repeating-linear-gradient(-45deg,transparent 0 60px,var(--accent) 61px,transparent 62px)}
+body[data-pattern="spectrum"]:before{background:conic-gradient(from 30deg at 50% 30%,#b86be4,#58d4db,#f5d16c,#ec889d,#b86be4);opacity:.12}
+.cosmetic-card{min-height:180px}.cosmetic-card small{font-size:12px;line-height:1.5}
+.portal-game-modal{width:94vw;max-width:1600px;height:90dvh;max-height:94dvh;padding:0;overflow:hidden;background:#101c2a;border:2px solid #b39d73}
+.portal-game-modal[open]{display:flex;flex-direction:column}
+.portal-game-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 18px;background:#122738;flex-shrink:0}
+.portal-game-heading h2{font:italic 26px Georgia,serif;margin:0}
+.portal-game-heading button{font:14px Arial,sans-serif;min-height:40px}
+#portal-game-frame{display:block;width:100%;flex:1;min-height:0;border:0;background:#07121c}
+@media(min-width:901px){
+ html,body{height:100%;min-height:0;overflow:hidden}
+ body{padding-bottom:0}
+ .app-shell{display:grid;grid-template-rows:auto minmax(0,1fr);height:100dvh;min-height:0;padding-bottom:var(--statistics-space);max-width:none}
+ .topbar{position:relative;top:auto;min-height:68px}
+ main{min-height:0;height:100%;overflow:hidden}
+ .page-panel{height:100%;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+ #page-lab{display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+ #page-lab[hidden]{display:none}
+ #connection-banner{flex:0 0 auto;max-height:90px;overflow:auto;padding:8px 18px}
+ .game-grid{flex:1;min-height:0;height:100%;align-items:stretch;grid-template-columns:minmax(0,30fr) minmax(0,44fr) minmax(290px,26fr)}
+ .game-grid>.reactor-panel,.game-grid>.activity-panel,.game-grid>.shop-panel{height:100%;min-height:0;max-height:none;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#b6cdb775 #0d2b3566;scrollbar-gutter:stable;align-self:stretch}
+ .game-grid>.reactor-panel{padding:22px 22px 28px;--integral-size:clamp(180px,min(24vw,43dvh),430px)}
+ .reactor-panel>*{flex-shrink:0}
+ .reactor-panel>.balance-label{font-size:20px;margin-top:0}
+ .reactor-panel>#balance{margin-top:6px;margin-bottom:0;font-size:44px;min-height:64px;line-height:64px}
+ .reactor-panel>.integral-stage{width:100%;height:calc(var(--integral-size) + 104px);min-height:0;margin:0;max-width:none}
+ #integral-button{width:var(--integral-size);height:var(--integral-size);max-width:none}
+ .integral-symbol{font-size:calc(var(--integral-size)*.35)}.integral-function{font-size:calc(var(--integral-size)*.125)}
+ .reactor-panel>.next-goal{margin:0;padding:17px 18px;gap:15px}
+ .next-goal .goal-copy>div:first-child{font-size:23px;line-height:1.3}
+ .next-goal #goal-progress{font-size:14px;line-height:1.5}
+ .next-goal .goal-copy p{font-size:20px;margin:8px 0 12px}
+ .reactor-panel>.click-hint{margin:15px 0;font-size:12px}
+ .reactor-panel .activity-events{width:100%;padding:12px 0 0;margin:0}
+ .activity-events-heading>h3{font-size:24px}
+ .game-grid>.activity-panel,.game-grid>.shop-panel{padding-top:0}
+ .activity-heading{position:sticky;top:0;z-index:4;padding:20px 24px;min-height:80px;background:#153a44 url('./assets/original/bgBlue.jpg');box-shadow:0 5px 15px #091d2d44}
+ body[data-theme]:not([data-theme="classic"]) .activity-heading{background-color:hsl(var(--world-hue) 33% 22%);background-blend-mode:luminosity}
+ .lab-scene,.residents-scene,.roster-section,.lab-roster{height:auto!important;max-height:none!important;overflow:visible!important}
+ .roster-section{padding:22px 23px}.roster-heading{margin-bottom:14px}.roster-heading h3{font-size:26px}
+ .shop-heading{min-height:79px;padding:15px 19px}.shop-heading h2{font-size:34px}
+ .shop-heading .quantity-switch button{min-width:34px;min-height:40px;font-size:12px}
+ .shop-tabs{min-height:60px;padding:0 9px;gap:8px}
+ .shop-tab{min-height:60px;font-size:20px;gap:6px}.shop-tab .shop-tab-icon{width:23px;font-size:23px}
+ .shop-panel .shop-list{height:auto;max-height:none;overflow:visible;padding-bottom:8px}
+ .bottom-strip{display:none}
+ #page-world{padding:0;overflow:hidden;position:relative}
+ #page-world #world-widget{margin:0;width:100%;height:100%;max-width:none;max-height:none;border:0;display:flex;flex-direction:column}
+ #page-world .world-viewport{position:relative;flex:1;height:100%;min-height:0;aspect-ratio:auto}
+ #world-canvas{height:100%;width:100%}
+ #page-world .world-statusbar{position:relative;inset:auto;flex:0 0 auto;min-height:40px;font-size:13px;line-height:1.4;padding:10px 20px;background:#102c38f0}
+ #page-world.cinematic-active .world-cinematic-dock{bottom:calc(var(--statistics-space) + 12px)}
+ .extra-page .section-heading{min-height:95px;padding-top:20px;padding-bottom:20px}
+}
+@media(max-width:1200px) and (min-width:901px){.footer>span:first-child,.footer .credits .footer-dot{display:none}.footer .credits{font-size:12px}.footer .credits a{font-size:12px}.game-grid{grid-template-columns:minmax(0,30fr) minmax(0,40fr) minmax(270px,30fr)}.game-grid>.reactor-panel{padding-left:12px;padding-right:12px}.shop-tab{font-size:18px}.activity-heading h2{font-size:28px}.next-goal .goal-copy>div:first-child{font-size:20px}}
+@media(max-width:900px){body{padding-bottom:var(--statistics-space)}.footer{justify-content:center;padding:7px 12px;gap:4px 15px}.footer>span:first-child{display:none}.footer .credits{flex:1 1 100%;font-size:11px}.footer .credits span,.footer .credits a{font-size:11px}.footer .other-games a{font-size:12px}.statistics-panel .lab-stats{grid-template-columns:repeat(4,minmax(0,1fr))}.statistics-panel .lab-stats>div{padding:6px 5px}.statistics-panel .lab-stats span{font-size:10px;margin-bottom:4px}.statistics-panel .lab-stats strong{font-size:17px}.statistics-panel .lab-stats .stat-prestige{grid-column:auto;display:block;min-height:0}.statistics-panel .lab-stats .stat-prestige strong{font-size:17px}.statistics-panel .lab-stats .stat-prestige span{font-size:10px}.achievement-group-grid{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}.achievements-page .achievement-card{min-height:0}.portal-game-modal{width:98vw;height:94dvh}.portal-game-heading{gap:10px;padding:10px}.portal-game-heading h2{font-size:22px}.portal-game-heading button{font-size:12px}}
+@media(prefers-reduced-motion:reduce){#golden-button.golden-flight{animation:none;left:auto;right:8vw;top:calc(var(--topbar-height) + 65px)}}
+#statistics-panel.statistics-dock{inset:auto 0 var(--credits-space);min-height:0}
+.achievements-page .achievement-card .achievement-medal{display:block;width:46px;height:55px;min-width:0;margin:0}
+.achievements-page .achievement-card .achievement-medal svg{display:block;width:46px;height:55px}
+@media(max-width:900px){#statistics-panel .lab-stats>div,#statistics-panel .lab-stats>div:nth-child(n+5),#statistics-panel .lab-stats .stat-prestige{grid-column:auto;min-height:52px;display:block}}
+@keyframes golden-flight{0%{transform:translate(12vw,4vh) rotate(-8deg)}25%{transform:translate(20vw,calc((100dvh - var(--topbar-height) - var(--statistics-space) - 150px)*.4)) rotate(6deg)}55%{transform:translate(30vw,7vh) rotate(-5deg)}80%{transform:translate(39vw,calc((100dvh - var(--topbar-height) - var(--statistics-space) - 150px)*.5)) rotate(8deg)}100%{transform:translate(46vw,9vh) rotate(-5deg)}}
+@media(max-width:900px){#statistics-panel.statistics-dock .lab-stats strong,#statistics-panel.statistics-dock .lab-stats .stat-prestige strong{font-size:16px;line-height:1.25}#statistics-panel.statistics-dock .lab-stats span{font-size:10px;line-height:1.3}#statistics-panel.statistics-dock .lab-stats>div{padding:6px 5px;min-height:50px}}

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { ACHIEVEMENTS,COSMETICS,collectAchievements,cosmeticUnlocked,prestigeAppearance,getPrestigeHonors } from '../shared/achievements.mjs';
 import { createState,applyAction,settle,getStats,PRESTIGE_PRICE,UPGRADES } from '../shared/economy.mjs';
 
-test('achievement catalog has 91 unique, meaningful milestones and keeps all original IDs',()=>{
-  assert.equal(ACHIEVEMENTS.length,91);assert.equal(new Set(ACHIEVEMENTS.map(a=>a.id)).size,91);
+test('achievement catalog has 120 unique, meaningful milestones and keeps all original IDs',()=>{
+  assert.equal(ACHIEVEMENTS.length,120);assert.equal(new Set(ACHIEVEMENTS.map(a=>a.id)).size,120);
   for(const id of ['first','click100','auto','hundred','team','research','speed','million','click1000','prestige','billion','all'])assert.ok(ACHIEVEMENTS.some(a=>a.id===id),id);
   const state=createState(0);
   for(const a of ACHIEVEMENTS){assert.ok(a.name&&a.text&&a.icon);assert.ok(a.target>0);assert.equal(a.value(state,getStats(state)),0);}
@@ -89,4 +89,17 @@ test('event and count-based cosmetics require their exact milestones',()=>{
   state.eventStats.wins=10;collectAchievements(state,getStats(state));assert.equal(cosmeticUnlocked(state,'aurora'),true);
   state.achievements=Array.from({length:100},(_,i)=>`prestige:${i+1}`);assert.equal(cosmeticUnlocked(state,'violet'),false);
   state.achievements=ACHIEVEMENTS.slice(0,10).map(a=>a.id);assert.equal(cosmeticUnlocked(state,'violet'),true);
+});
+
+test('all twenty cosmetic rewards have valid requirements and unlock through retained achievements',()=>{
+  assert.equal(COSMETICS.length,20);assert.equal(new Set(COSMETICS.map(c=>c.id)).size,20);
+  for(const c of COSMETICS){
+    for(const id of c.requiredIds||[])assert.ok(ACHIEVEMENTS.some(a=>a.id===id),`${c.id}: ${id}`);
+    assert.ok(c.colors.accent&&c.colors.tint&&c.colors.glow&&c.pattern);
+  }
+  const state=createState(0);state.upgrades=UPGRADES.map(u=>u.id);state.generators=state.generators.map(()=>150);state.clicks=25000;state.totalEarned=1e15;state.eventStats.wins=100;state.prestigeCount=1;
+  collectAchievements(state,getStats(state));
+  assert.equal(COSMETICS.filter(c=>cosmeticUnlocked(state,c.id)).length,20);
+  state.generators.fill(0);state.upgrades=[];collectAchievements(state,getStats(state));
+  assert.equal(COSMETICS.filter(c=>cosmeticUnlocked(state,c.id)).length,20);
 });

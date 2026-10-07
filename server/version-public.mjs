@@ -8,7 +8,8 @@ import {fileURLToPath} from 'node:url';
 export function versionPublic(directory){
   const root=resolve(directory);
   const modules=[...readdirSync(root).filter(f=>f.endsWith('.mjs')),...readdirSync(resolve(root,'shared')).filter(f=>f.endsWith('.mjs')).map(f=>`shared/${f}`)].sort();
-  const files=['index.html','style.css',...modules];
+  const styles=readdirSync(root).filter(file=>file.endsWith('.css')).sort();
+  const files=['index.html',...styles,...modules];
   const original=new Map(files.map(file=>[file,readFileSync(resolve(root,file),'utf8')]));
   const hash=createHash('sha256');
   for(const [file,content]of original)hash.update(file+'\0'+content+'\0');
@@ -17,7 +18,7 @@ export function versionPublic(directory){
     const source=original.get(file).replace(/(\bfrom\s*['"])(\.{1,2}\/[^'"?]+\.mjs)(['"])/g,`$1$2?v=${version}$3`);
     writeFileSync(resolve(root,file),source);
   }
-  const html=original.get('index.html').replace(/(href=['"]\.\/style\.css)(['"])/,`$1?v=${version}$2`).replace(/(src=['"]\.\/app\.mjs)(['"])/,`$1?v=${version}$2`);
+  const html=original.get('index.html').replace(/(href=['"]\.\/[^'"?]+\.css)(['"])/g,`$1?v=${version}$2`).replace(/(src=['"]\.\/app\.mjs)(['"])/,`$1?v=${version}$2`);
   writeFileSync(resolve(root,'index.html'),html);
   return version;
 }

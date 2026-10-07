@@ -65,7 +65,10 @@ test('prestige pulls the terrain, roads and river away, then reveals the buffere
   assert.ok(browserMock.paint.some(p=>p.color===landColors[0]),'new land is revealed');
   assert.equal(browserMock.portraitCount,0,'the new zero-generator state replaces the absorbed population');
   browserMock.clear();browserMock.frameAt(6500);await animation;
-  assert.ok(browserMock.labels.includes('ВСЕЛЕННАЯ · 9'));assert.equal(browserMock.frames.size,0);
+  assert.ok(browserMock.labels.includes('Неизвестный район'),'the new empty world returns to undiscovered districts');
+  assert.equal(browserMock.labels.includes('Школа'),false,'old district labels disappear together with the absorbed inhabitants');
+  assert.equal(browserMock.labels.some(label=>/АТЛАС БЕСКОНЕЧНОСТИ|Нажмите на здание|ВСЕЛЕННАЯ ·/.test(String(label))),false,'map instructions and era are rendered once in the HTML status panel');
+  assert.equal(browserMock.frames.size,0);
   assert.deepEqual(old,untouchedOld);assert.deepEqual(fresh,untouchedFresh);
 });
 
@@ -85,9 +88,11 @@ test('the new orbital mind uses the supplied brain, stays inspectable, and joins
   const world=mock.world({onLocation:value=>locations.push(value),onInspect:value=>inspections.push(value)});
   const legacy={generators:Array(10).fill(0),prestige:2},unchanged=structuredClone(legacy);
   world.update(legacy);assert.deepEqual(legacy,unchanged);assert.equal(mock.portraitCount,0);
-  assert.ok(mock.labels.includes('Орбитальный сверхразум'));assert.ok(mock.labels.every(label=>!String(label).includes('NaN')));
-  mock.click(238,191);assert.deepEqual(locations,[{id:'orbitalmind',name:'Орбитальный сверхразум',generatorIndices:[10]}]);
+  assert.equal(mock.labels.includes('Орбитальный сверхразум'),false,'a legacy empty slot does not reveal the future district');
+  assert.ok(mock.labels.includes('Неизвестный район'));assert.ok(mock.labels.every(label=>!String(label).includes('NaN')));
+  mock.click(238,191);assert.deepEqual(locations,[{id:'orbitalmind',name:'Неизвестный район',unlocked:false,generatorIndices:[]}]);
   const state=newWorld();state.generators[10]=3;mock.clear();world.update(state);
+  assert.ok(mock.labels.includes('Орбитальный сверхразум'),'owning the new resource reveals its district name');
   const brains=mock.portraits.filter(p=>p.source.endsWith('/assets/custom/superintelligence.png'));
   assert.equal(brains.length,3,'main core and two working satellites use the supplied artwork');
   assert.ok(brains.every(p=>p.args.length===8&&p.args[1]+p.args[3]<740),'the canvas crops the image above its city');

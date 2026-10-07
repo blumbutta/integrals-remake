@@ -1,4 +1,5 @@
 import {GENERATORS} from './shared/economy.mjs';
+import {EVENTS,eventAvailable} from './shared/events.mjs';
 
 const W=1200,H=760,ACTOR_LIMIT=45,PARTICLE_LIMIT=70,FRAME_MS=1000/30;
 const HUB={x:592,y:533},HOLE={x:651,y:125};
@@ -12,6 +13,21 @@ const LOCATIONS=[
   {id:'thought',name:'Башня Глубокой мысли',generatorIndices:[9],x:1100,y:367,bounds:[1039,271,143,185],label:[1100,485],unlock:'Глубокая мысль'},
   {id:'orbitalmind',name:'Орбитальный сверхразум',generatorIndices:[10],x:238,y:105,bounds:[131,25,214,151],label:[238,191],unlock:'Сверхразум ИИ'},
 ];
+// Every visible map detail goes through ownership, including event lists and labels.
+export function worldLocations(state={}){
+  return LOCATIONS.map(location=>{
+    const unlocked=location.generatorIndices.some(index=>(state.generators?.[index]||0)>0);
+    return {id:location.id,name:unlocked?location.name:'Неизвестный район',unlocked,generatorIndices:unlocked?location.generatorIndices.filter(index=>(state.generators?.[index]||0)>0):[]};
+  });
+}
+export function worldEventsFor(state={},locationId=null){
+  const location=locationId?LOCATIONS.find(item=>item.id===locationId):null;
+  if(locationId&&!location)return [];
+  return EVENTS.filter(event=>{
+    const index=GENERATORS.findIndex(generator=>generator.id===event.generatorId);
+    return (state.generators?.[index]||0)>0&&(!location||location.generatorIndices.includes(index));
+  });
+}
 const HOMES=[{x:585,y:544,size:30},{x:167,y:493,size:47},{x:408,y:353,size:51},{x:267,y:480,size:65},{x:823,y:525,size:48},{x:491,y:350,size:51},{x:958,y:495,size:42},{x:967,y:167,size:77},{x:687,y:235,size:55},{x:1101,y:370,size:75},{x:238,y:156,size:102}];
 const TASKS=[['Собирает новую идею','Доставляет интегралы в центр'],['Решает домашнее задание','Считает пример в тетради'],['Готовится к сессии','Ищет первообразную'],['Объясняет решение у доски','Проверяет школьные работы'],['Вычисляет численный интеграл','Обрабатывает новые данные'],['Доказывает новую теорему','Читает научный доклад'],['Обучает математическую модель','Сопоставляет закономерности'],['Принимает идеи другого измерения','Стабилизирует портал'],['Возвращает вычисления из будущего','Сверяет научное время'],['Ищет главный ответ','Размышляет о бесконечности'],['Открывает новую математическую аксиому','Объединяет мысли целой вселенной']];
 const GLYPHS=['∫','x²','+ C','Σ','dx','π','λ','∞'];
@@ -32,7 +48,9 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     const counts=Array.from({length:GENERATORS.length},(_,i)=>Number.isFinite(state.generators?.[i])?Math.max(0,Math.floor(state.generators[i])):0);
     const prestige=Number.isFinite(state.prestige)?Math.max(0,state.prestige):0;
     const hue=Number.isFinite(Number(options.hue))?((Number(options.hue)%360)+360)%360:206+Math.min(65,Math.log2(prestige+1)*5);
-    return {counts,prestige,hue,accent:typeof options.accent==='string'?options.accent:'#a8f4ef',total:counts.reduce((a,b)=>a+b,0)};
+    const now=Number.isFinite(options.now)?options.now:Date.now();
+    const markers=LOCATIONS.map(location=>{const events=worldEventsFor(state,location.id);return {ready:events.filter(event=>eventAvailable(state,event.id,now)).length,active:events.some(event=>event.id===state.activeEvent?.eventId)};});
+    return {counts,prestige,hue,accent:typeof options.accent==='string'?options.accent:'#a8f4ef',total:counts.reduce((a,b)=>a+b,0),markers};
   };
   let latest=snapshot(),shown=latest;
   const images=FILES.map(file=>{const image=new Image();image.decoding='async';image.onload=image.onerror=()=>{if(!destroyed)draw();};image.src=new URL(file,import.meta.url).href;return image;});
@@ -213,11 +231,19 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     const p=progress();
     LOCATIONS.forEach((location,index)=>{
       const unlocked=available(location);object(location.x,location.y,index+1,()=>{
-        ctx.save();if(!unlocked)ctx.globalAlpha*=.18;BUILDINGS[index]();ctx.restore();
+        if(unlocked)BUILDINGS[index]();
+        else{
+          // Fog does not reveal the silhouette, icon, name or type of a future resource.
+          for(let cloud=0;cloud<5;cloud++)ellipse(location.x+(cloud-2)*20,location.y-8+(cloud%2)*10,53,28,'rgba(28,53,65,.46)');
+          text('?',location.x,location.y+8,32,'#789396','Georgia, serif','center');
+        }
         if(!cinema||p>.9){
-          const [x,y]=location.label;rr(x-103,y-13,206,36,7,unlocked?'rgba(7,30,36,.8)':'rgba(9,30,36,.4)');
-          text(location.name,x,y+1,12,unlocked?'#d4e2d4':'#8ba5a0','sans-serif','center');
-          const count=location.generatorIndices.reduce((n,i)=>n+shown.counts[i],0);text(unlocked?`Помощников: ${count} · исследовать →`:location.unlock,x,y+15,8.5,unlocked?'#8db7ac':'#71918b','sans-serif','center');
+          const [x,y]=location.label,marker=shown.markers[index];
+          rr(x-105,y-15,210,43,7,unlocked?'rgba(7,30,36,.9)':'rgba(9,30,36,.54)',marker.ready||marker.active?'#dfc785':null);
+          text(unlocked?location.name:'Неизвестный район',x,y+1,12,unlocked?'#e2e9da':'#a5b9b5','sans-serif','center');
+          const count=location.generatorIndices.reduce((n,i)=>n+shown.counts[i],0);
+          text(!unlocked?'Откроется с новым помощником':marker.active?'◷ Испытание идёт →':marker.ready?`✦ Доступно испытаний: ${marker.ready} →`:`Помощников: ${count} · открыть →`,x,y+18,11,marker.ready||marker.active?'#f4d991':'#a9c4bb','sans-serif','center');
+          if(unlocked&&(marker.ready||marker.active)){glow(location.x,location.y-55,37,'#f6d989',.2);ellipse(location.x,location.y-55,14,14,'#102d39','#e8c988',1.5);text(marker.active?'◷':'!',location.x,location.y-49,18,'#ffe6a7','Georgia, serif','center');}
         }
       });
     });
@@ -300,7 +326,6 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     ctx.setTransform(dpr,0,0,dpr,0,0);ctx.translate(ox,oy);ctx.scale(scale,scale);
     ctx.save();ctx.beginPath();ctx.rect(view.left,view.top,view.right-view.left,view.bottom-view.top);ctx.clip();sky();landLayer(600,535,.37,.805,terrain);nature();buildings();reactor();drawActors();drawParticles();spaceDust();blackHole();
     if(cinema){const p=progress();text(p<.22?'Пространство начинает изгибаться…':p<.76?'Идеи возвращаются к истоку':p<.88?'За пределами бесконечности':'Новая вселенная. Новое начало.',600,724,17,'#d8e9e2','Georgia, serif','center');}
-    else{text('АТЛАС БЕСКОНЕЧНОСТИ',38,716,12,'#a6c1b3','sans-serif');text('Нажмите на здание или помощника',38,737,10,'#739c91','sans-serif');text(shown.prestige?`ВСЕЛЕННАЯ · ${Math.floor(shown.prestige)}`:'ПЕРВАЯ ВСЕЛЕННАЯ',1160,731,10,'#8caeaa','sans-serif','right');}
     ctx.restore();ctx.setTransform(1,0,0,1,0,0);
   }
   const canAnimate=()=>!destroyed&&!manualPaused&&!document.hidden&&inView&&!reduced&&(shown.total>0||!!cinema);
@@ -308,7 +333,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
   function schedule(){if(canAnimate()){if(!raf){lastFrame=performance.now();raf=requestAnimationFrame(loop);}}else if(raf){cancelAnimationFrame(raf);raf=0;}}
   function applyLatest(){shown=latest;rebuildActors();particles=[];waves=[];draw();schedule();}
   function update(state,options={}){
-    if(destroyed)return;const next=snapshot(state,options),changed=next.counts.some((v,i)=>v!==latest.counts[i])||next.hue!==latest.hue||next.prestige!==latest.prestige||next.accent!==latest.accent;latest=next;
+    if(destroyed)return;const next=snapshot(state,options),changed=next.counts.some((v,i)=>v!==latest.counts[i])||next.hue!==latest.hue||next.prestige!==latest.prestige||next.accent!==latest.accent||next.markers.some((marker,index)=>marker.ready!==latest.markers[index].ready||marker.active!==latest.markers[index].active);latest=next;
     if(!cinema&&changed)applyLatest();
   }
   function resize(){if(destroyed)return;const r=canvas.getBoundingClientRect();width=Math.max(1,r.width||W);height=Math.max(1,r.height||H);dpr=Math.min(2,window.devicePixelRatio||1);canvas.width=Math.round(width*dpr);canvas.height=Math.round(height*dpr);scale=Math.min(width/W,height/H);ox=(width-W*scale)/2;oy=(height-H*scale)/2;
@@ -342,7 +367,7 @@ export function createLabWorld(canvas,{onInspect,onLocation}={}){
     const hit=hitAreas.findLast(a=>x>=a.x-a.w*.55&&x<=a.x+a.w*.55&&y>=a.y-a.size&&y<=a.y+6);
     if(hit&&typeof onInspect==='function'){lastInspection=now;const i=hit.actor.type;onInspect({generatorIndex:i,name:GENERATORS[i].name,count:shown.counts[i],task:TASKS[i][Math.floor(time/8+hit.actor.phase)%TASKS[i].length]});return;}
     const location=LOCATIONS.findLast(l=>{const [bx,by,bw,bh]=l.bounds,[lx,ly]=l.label;return (x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh)||(x>=lx-104&&x<=lx+104&&y>=ly-14&&y<=ly+24);});
-    if(location&&typeof onLocation==='function'){lastInspection=now;onLocation({id:location.id,name:location.name,generatorIndices:[...location.generatorIndices]});}
+    if(location&&typeof onLocation==='function'){lastInspection=now;onLocation(worldLocations({generators:shown.counts}).find(item=>item.id===location.id));}
   }
   function visibility(){if(document.hidden&&cinema)finishPrestige();schedule();if(!document.hidden)draw();}
   function pagehide(){finishPrestige();if(raf){cancelAnimationFrame(raf);raf=0;}}

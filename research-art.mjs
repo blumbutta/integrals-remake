@@ -26,7 +26,24 @@ const drawings=[
   '<path d="M22 11c-5-8-14-4-14 3-7 2-7 12-1 15-2 8 8 12 14 6V12m6-1c5-8 14-4 14 3 7 2 7 12 1 15 2 8-8 12-14 6V12M12 16h5v8h5m-10 5h5v-5m19-8h-5v8h-4m10 5h-6v-5"/><circle cx="12" cy="16" r="1.5"/><circle cx="36" cy="16" r="1.5"/><path d="M11 42c9 6 21 4 28-3m-6-1 7 1-3 6"/>',
   '<path d="m24 3 17 10v21L24 44 7 34V13zM7 13l17 10 17-10M24 23v21M7 34l17-11 17 11M24 3v9"/><path d="m24 14 8 5v10l-8 5-8-5V19z"/><circle cx="24" cy="23" r="4"/><circle cx="7" cy="13" r="2.5"/><circle cx="41" cy="13" r="2.5"/><circle cx="24" cy="44" r="2.5"/>',
 ];
+// Every appended research has its own geometric construction, not a recycled icon.
+function advancedDrawing(index){
+  const n=index-drawings.length,kind=n%6,turn=Math.floor(n/6),angle=turn*17;
+  const motifs=[
+    '<path d="M10 9v27l7-7 6 11 5-3-6-11h11z"/><path d="M31 6v10m-5-5h10"/>',
+    '<circle cx="24" cy="24" r="8"/><path d="M24 4v9m0 22v9M4 24h9m22 0h9"/>',
+    '<path d="M8 31 17 13l10 22 13-24M8 39h32"/><circle cx="17" cy="13" r="3"/><circle cx="27" cy="35" r="3"/>',
+    '<path d="M8 13h32v25H8zM8 19h32M15 27h6m5 0h7M15 32h16"/><path d="m13 7 6 6 6-6 6 6 6-6"/>',
+    '<path d="m24 6 17 10v17L24 43 7 33V16zM7 16l17 10 17-10M24 26v17"/><circle cx="24" cy="21" r="5"/>',
+    '<ellipse cx="24" cy="24" rx="18" ry="8"/><ellipse cx="24" cy="24" rx="8" ry="18"/><circle cx="24" cy="24" r="3"/>',
+  ];
+  const dots=Array.from({length:3+(turn%4)},(_,i)=>{
+    const a=(i*360/(3+turn%4)+angle)*Math.PI/180;
+    return `<circle cx="${(24+21*Math.cos(a)).toFixed(2)}" cy="${(24+21*Math.sin(a)).toFixed(2)}" r="${1+(turn%3)*0.35}" fill="currentColor" stroke="none"/>`;
+  }).join('');
+  return `<g transform="rotate(${angle} 24 24)">${motifs[kind]}</g>${dots}`;
+}
 export function researchArtwork(index,owned=false){
   const hue=(index*37+28)%360;
-  return `<span class="research-emblem" style="--research-hue:${hue}" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${drawings[index%drawings.length]}</svg><span class="research-tier">${owned?'✓':String(index+1).padStart(2,'0')}</span></span>`;
+  return `<span class="research-emblem" style="--research-hue:${hue}" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${index<drawings.length?drawings[index]:advancedDrawing(index)}</svg><span class="research-tier">${owned?'✓':String(index+1).padStart(2,'0')}</span></span>`;
 }

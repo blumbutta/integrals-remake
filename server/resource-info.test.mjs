@@ -30,3 +30,13 @@ test('anonymous resource details expose no name, description, production or rese
   const s=createState();s.totalEarned=100;
   for(const generator of GENERATORS.slice(1))assert.deepEqual(Object.keys(resourceInfo(s,generator.id)).sort(),['discovered','id','price','unlockPrice']);
 });
+
+test('resource tooltip attributes teamwork to its source and includes newly unlocked research',()=>{
+  const state=createState(0);state.generators[0]=50;state.generators[10]=10;state.totalEarned=1e15;state.upgrades=['autoclick-team'];
+  const info=resourceInfo(state,'autoclick');
+  assert.ok(info.teamworkCps>info.directCps);assert.equal(info.teamworkBonus,0.2*50/150);
+  assert.equal(info.totalCps,info.teamworkCps+info.directCps);assert.equal(info.unitCps,info.totalCps/50);
+  assert.equal(info.research.find(u=>u.id==='autoclick-team').owned,true);
+  assert.equal(info.research.find(u=>u.id==='autoclick-3').owned,false);
+  assert.equal(info.research.some(u=>u.id==='autoclick-4'),false);
+});

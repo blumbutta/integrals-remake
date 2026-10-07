@@ -32,36 +32,53 @@ export const ACHIEVEMENTS=Object.freeze([
   item('billion','⊙','Масштаб вселенной','Получить 1 миллиард интегралов',1e9,earned),
   item('all','ψ','Единая теория','Открыть все виды производства',stages.length,state=>stages.reduce((sum,_,i)=>sum+(Math.max(safe(state.generators?.[i]),safe(state.achievementRecords?.generators?.[i]))>0?1:0),0)),
   ...[
-    [10,'Первые штрихи'],[500,'Ритм исследования'],[10_000,'Твёрдая рука'],[100_000,'Мастер повторения'],[1_000_000,'Миллион прикосновений'],
+    [10,'Первые штрихи'],[500,'Ритм исследования'],[10_000,'Твёрдая рука'],[25_000,'Рука бесконечности'],[100_000,'Мастер повторения'],[1_000_000,'Миллион прикосновений'],
   ].map(([n,name])=>item('click'+n,'↖',name,`Сделать ${countText(n)} кликов`,n,clicks)),
   ...[
     [100,'Числа обретают вес'],[10_000,'Пять порядков'],[100_000,'Предел близко'],[1e7,'Семь нулей'],[1e8,'За горизонтом'],[1e10,'Новая величина'],[1e12,'Триллион возможностей'],[1e15,'Квадриллион решений'],
   ].map(([n,name])=>item('earned-'+n,'∫',name,`Получить ${countText(n)} интегралов за всё время`,n,earned)),
   ...[
-    [1,'Тихий поток'],[10,'Уверенный темп'],[1000,'Тысяча в секунду'],[10_000,'Поток идей'],[100_000,'Вычислительный шторм'],[1e6,'Скорость мысли'],[1e7,'Непрерывная бесконечность'],
+    [1,'Тихий поток'],[10,'Уверенный темп'],[1000,'Тысяча в секунду'],[10_000,'Поток идей'],[100_000,'Вычислительный шторм'],[1e6,'Скорость мысли'],[1e7,'Непрерывная бесконечность'],[1e8,'Световая скорость'],[1e9,'Галактический поток'],[1e10,'Математическая цивилизация'],
   ].map(([n,name])=>item('cps-'+n,'↗',name,`Достичь производства ${countText(n)} интегралов/с`,n,peakCps)),
   ...stages.flatMap(([id,name,icon,plural],index)=>[1,10,25,100].map(n=>item(
     `stage-${id}-${n}`,icon,`${name} · ${n===1?'начало':n===10?'команда':n===25?'отдел':'империя'}`,
     n===1?`Купить помощника «${name}»`:`Иметь ${n} ${plural} одновременно`,n,
     state=>Math.max(safe(state.generators?.[index]),safe(state.achievementRecords?.generators?.[index])),
   ))),
-  ...[[1,'Любопытство'],[10,'Десять открытий'],[24,'Все грани знания'],[26,'Разум без границ']].map(([n,name])=>item('upgrades-'+n,'⌁',name,`Завершить ${n} исследований за один цикл`,n,peakUpgrades)),
+  ...[[1,'Любопытство'],[10,'Десять открытий'],[24,'Все грани знания'],[26,'Разум без границ'],[40,'Архитектор знаний'],[60,'Энциклопедия методов'],[86,'Исследовано всё']].map(([n,name])=>item('upgrades-'+n,'⌁',name,`Завершить ${n} исследований за один цикл`,n,peakUpgrades)),
   ...[[1,'Первое испытание'],[10,'Верные решения'],[50,'Мастер задач'],[100,'Безупречная практика']].map(([n,name])=>item('event-wins-'+n,'✓',name,`Победить в ${n} испытаниях`,n,wins)),
   ...[[2,'Вторая жизнь'],[5,'Пять начал'],[10,'Вечное возвращение'],[25,'За пределами циклов']].map(([n,name])=>item('prestige-runs-'+n,'∞',name,`Выполнить ${n} перерождений`,n,prestiges)),
+  ...stages.flatMap(([id,name,icon,plural],index)=>[50,150].map(n=>item(
+    `stage-${id}-${n}`,icon,`${name} · ${n===50?'сотрудничество':'научная школа'}`,
+    `Иметь ${n} ${plural} одновременно`,n,
+    state=>Math.max(safe(state.generators?.[index]),safe(state.achievementRecords?.generators?.[index])),
+  ))),
   ...[[100,'Большая лаборатория'],[500,'Исследовательский город'],[1000,'Цивилизация науки']].map(([n,name])=>item('team-'+n,'π',name,`Иметь ${countText(n)} помощников одновременно`,n,peakGenerators)),
 ]);
 const KNOWN_IDS=new Set(ACHIEVEMENTS.map(a=>a.id));
 const knownPrestige=id=>/^prestige:[1-9]\d{0,15}$/.test(id)&&Number.isSafeInteger(Number(id.slice(9)));
 
 export const COSMETICS=Object.freeze([
-  {id:'classic',name:'Классическая лаборатория',description:'Оригинальная синяя лаборатория, дерево и белый интеграл.',colors:{accent:'#f17154',tint:'#221611',glow:'#f1715455'},pattern:'classic'},
-  {id:'chalk',name:'Меловая доска',description:'Зелёная доска и светлые штрихи. Награда за 10 кликов.',requiredIds:['click10'],colors:{accent:'#b9e4bb',tint:'#102019',glow:'#b9e4bb44'},pattern:'chalk'},
-  {id:'jade',name:'Нефритовый класс',description:'Свежая зелень первой школьной команды.',requiredIds:['stage-abacus-1'],colors:{accent:'#55d6a0',tint:'#0d201a',glow:'#55d6a055'},pattern:'leaves'},
-  {id:'violet',name:'Фиолетовая геометрия',description:'Мягкий фиолетовый свет за 10 открытых достижений.',requiredCount:10,colors:{accent:'#b28cff',tint:'#1b1329',glow:'#b28cff55'},pattern:'lattice'},
-  {id:'amber',name:'Янтарный импульс',description:'Солнечные лучи за 1 000 кликов.',requiredIds:['click1000'],colors:{accent:'#ffc45f',tint:'#251b0d',glow:'#ffc45f55'},pattern:'rays'},
-  {id:'starfield',name:'Миллион звёзд',description:'Звёздное небо за первый миллион интегралов.',requiredIds:['million'],colors:{accent:'#91c6ff',tint:'#101a30',glow:'#91c6ff66'},pattern:'stars'},
-  {id:'aurora',name:'Северное сияние',description:'Переливы полярного света за 10 побед в испытаниях.',requiredIds:['event-wins-10'],colors:{accent:'#6ce8d2',tint:'#101e29',glow:'#ad90ff66'},pattern:'aurora'},
-  {id:'blueprint',name:'Чертёж бесконечности',description:'Новая система координат за первое перерождение.',requiredIds:['prestige'],colors:{accent:'#83bfff',tint:'#10233b',glow:'#83bfff55'},pattern:'blueprint'},
+  {id:'classic',hue:206,name:'Классическая лаборатория',description:'Оригинальная синяя лаборатория, дерево и белый интеграл.',colors:{accent:'#f17154',tint:'#221611',glow:'#f1715455'},pattern:'classic'},
+  {id:'chalk',hue:123,name:'Меловая доска',description:'Зелёная доска и светлые штрихи. Награда за 10 кликов.',requiredIds:['click10'],colors:{accent:'#b9e4bb',tint:'#102019',glow:'#b9e4bb44'},pattern:'chalk'},
+  {id:'jade',hue:155,name:'Нефритовый класс',description:'Свежая зелень первой школьной команды.',requiredIds:['stage-abacus-1'],colors:{accent:'#55d6a0',tint:'#0d201a',glow:'#55d6a055'},pattern:'leaves'},
+  {id:'violet',hue:260,name:'Фиолетовая геометрия',description:'Мягкий фиолетовый свет за 10 открытых достижений.',requiredCount:10,colors:{accent:'#b28cff',tint:'#1b1329',glow:'#b28cff55'},pattern:'lattice'},
+  {id:'amber',hue:39,name:'Янтарный импульс',description:'Солнечные лучи за 1 000 кликов.',requiredIds:['click1000'],colors:{accent:'#ffc45f',tint:'#251b0d',glow:'#ffc45f55'},pattern:'rays'},
+  {id:'starfield',hue:211,name:'Миллион звёзд',description:'Звёздное небо за первый миллион интегралов.',requiredIds:['million'],colors:{accent:'#91c6ff',tint:'#101a30',glow:'#91c6ff66'},pattern:'stars'},
+  {id:'aurora',hue:168,name:'Северное сияние',description:'Переливы полярного света за 10 побед в испытаниях.',requiredIds:['event-wins-10'],colors:{accent:'#6ce8d2',tint:'#101e29',glow:'#ad90ff66'},pattern:'aurora'},
+  {id:'blueprint',hue:212,name:'Чертёж бесконечности',description:'Новая система координат за первое перерождение.',requiredIds:['prestige'],colors:{accent:'#83bfff',tint:'#10233b',glow:'#83bfff55'},pattern:'blueprint'},
+  {id:'parchment',hue:39,name:'Золотой пергамент',description:'Тёплый свет старых научных рукописей за 1 000 интегралов.',requiredIds:['hundred'],colors:{accent:'#f2d59a',tint:'#302415',glow:'#f2d59a55'},pattern:'parchment'},
+  {id:'midnight',hue:220,name:'Полночь в библиотеке',description:'Чернильное небо и серебряные линии за 500 кликов.',requiredIds:['click500'],colors:{accent:'#b4c5eb',tint:'#111522',glow:'#8c9edd55'},pattern:'ink'},
+  {id:'rose',hue:338,name:'Розовая лекция',description:'Пудровый свет первой студенческой команды.',requiredIds:['stage-calculator-1'],colors:{accent:'#f0b3cb',tint:'#2c1726',glow:'#f0b3cb44'},pattern:'lattice'},
+  {id:'copper',hue:28,name:'Медный механизм',description:'Медные соты и тёплые детали за 10 исследований.',requiredIds:['upgrades-10'],colors:{accent:'#edb17d',tint:'#2d1d17',glow:'#edb17d55'},pattern:'honeycomb'},
+  {id:'arctic',hue:186,name:'Полярная станция',description:'Ледяные кристаллы за команду из 100 помощников.',requiredIds:['team-100'],colors:{accent:'#c1eff4',tint:'#132831',glow:'#c1eff455'},pattern:'crystal'},
+  {id:'terminal',hue:109,name:'Фосфорный терминал',description:'Светящиеся схемы за первый компьютер.',requiredIds:['stage-neuron-1'],colors:{accent:'#a5ee94',tint:'#122017',glow:'#a5ee9444'},pattern:'circuit'},
+  {id:'observatory',hue:43,name:'Ночная обсерватория',description:'Созвездия и латунный свет за первого профессора.',requiredIds:['stage-quantum-1'],colors:{accent:'#ddc792',tint:'#172037',glow:'#ddc79255'},pattern:'constellations'},
+  {id:'ruby',hue:349,name:'Рубиновое доказательство',description:'Грани красного кристалла за 50 побед в испытаниях.',requiredIds:['event-wins-50'],colors:{accent:'#f49eae',tint:'#301620',glow:'#f49eae55'},pattern:'diamonds'},
+  {id:'abyss',hue:181,name:'Океан чисел',description:'Глубокая бирюза и волны за 10 000 000 000 интегралов.',requiredIds:['earned-10000000000'],colors:{accent:'#7ce0e1',tint:'#092b32',glow:'#7ce0e155'},pattern:'wave'},
+  {id:'solar',hue:43,name:'Солнечная лаборатория',description:'Золотые орбиты за 50 открытых достижений.',requiredCount:50,colors:{accent:'#ffe39a',tint:'#342817',glow:'#ffe39a66'},pattern:'orbit'},
+  {id:'monolith',hue:215,name:'Серебряный монолит',description:'Сдержанный серебряный чертёж за 40 исследований.',requiredIds:['upgrades-40'],colors:{accent:'#d4dce7',tint:'#1b202a',glow:'#d4dce744'},pattern:'blueprint'},
+  {id:'spectrum',hue:273,name:'Спектр открытий',description:'Цветные волны за 60 исследований в одном цикле.',requiredIds:['upgrades-60'],colors:{accent:'#dcb4ff',tint:'#21162f',glow:'#9ce9f966'},pattern:'spectrum'},
 ]);
 
 export function collectAchievements(state,stats={}){

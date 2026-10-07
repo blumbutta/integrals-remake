@@ -7,7 +7,7 @@ test('first generator has reachable price and production; bulk prices compound',
   applyAction(s,{type:'buy',itemId:'autoclick'},0);assert.equal(s.balance,0);assert.equal(getStats(s).cps,0.25);
   settle(s,10000);assert.equal(s.balance,2.5);
   assert.equal(priceFor('autoclick',0),15);assert.equal(priceFor('autoclick',1),18);
-  assert.ok(priceFor('autoclick',0,10)>150);assert.equal(GENERATORS.length,11);assert.equal(UPGRADES.length,26);
+  assert.ok(priceFor('autoclick',0,10)>150);assert.equal(GENERATORS.length,11);assert.equal(UPGRADES.length,86);
 });
 test('legacy ten-stage saves append zero slots without losing balances, records or active challenge stakes',()=>{
   const state=createState(0);state.generators=[4,1,2,3,0,0,0,0,0,0];
@@ -26,13 +26,13 @@ test('legacy ten-stage saves append zero slots without losing balances, records 
 test('superintelligence can be purchased from an old save and both researches multiply its production',()=>{
   const state=createState(0);state.generators=Array(10).fill(0);state.balance=1e20;
   const generator=GENERATORS.at(-1);assert.equal(generator.id,'superintelligence');
-  assert.equal(generator.basePrice,10_000_000_000_000);assert.equal(generator.baseCps,240_000_000);
+  assert.equal(generator.basePrice,10_000_000_000_000);assert.equal(generator.baseCps,8_000_000_000);
   assert.throws(()=>applyAction(state,{type:'upgrade',itemId:'superintelligence-1'},0),{code:'upgrade_locked'});
-  applyAction(state,{type:'buy',itemId:'superintelligence',amount:10},0);assert.equal(state.generators[10],10);assert.equal(getStats(state).cps,2_400_000_000);
-  applyAction(state,{type:'upgrade',itemId:'superintelligence-1'},0);assert.equal(getStats(state).cps,4_800_000_000);
+  applyAction(state,{type:'buy',itemId:'superintelligence',amount:10},0);assert.equal(state.generators[10],10);assert.equal(getStats(state).cps,80_000_000_000);
+  applyAction(state,{type:'upgrade',itemId:'superintelligence-1'},0);assert.equal(getStats(state).cps,160_000_000_000);
   assert.throws(()=>applyAction(state,{type:'upgrade',itemId:'superintelligence-2'},0),{code:'upgrade_locked'});
   applyAction(state,{type:'buy',itemId:'superintelligence',amount:15},0);applyAction(state,{type:'upgrade',itemId:'superintelligence-2'},0);
-  assert.equal(getStats(state).cps,24_000_000_000);assert.ok(state.achievements.includes('stage-superintelligence-25'));
+  assert.equal(getStats(state).cps,800_000_000_000);assert.ok(state.achievements.includes('stage-superintelligence-25'));
   assert.ok(UPGRADES.every(u=>u.name&&u.description));
 });
 test('offline production pays half after grace and stops after 12 hours, even across repeated settlement',()=>{
@@ -91,4 +91,74 @@ test('MAX purchase supports arbitrary count and achievements survive prestige',(
   assert.equal(s.generators[0],27);assert.ok(s.achievements.includes('team'));assert.ok(s.achievements.includes('auto'));
   applyAction(s,{type:'prestige'},0);assert.equal(s.generators[0],0);
   assert.ok(s.achievements.includes('team'));assert.ok(s.achievements.includes('prestige'));
+});
+
+test('manual clicks follow production at every stage and prestige is applied only once',()=>{
+  const state=createState(0);state.generators[7]=10;state.upgrades=['click-1','click-2','click-3'];
+  const base=getStats(state);
+  assert.equal(base.clickProductionShare,0.05);assert.equal(base.clickPower,8+base.cps*0.05);
+  state.prestige=9;const prestiged=getStats(state);
+  assert.equal(prestiged.clickPower,base.clickPower*1.9);
+  const before=state.balance;
+  const response=applyAction(state,{type:'click',amount:3},0);
+  assert.equal(response.reward,prestiged.clickPower*3);assert.equal(state.balance-before,response.reward);
+  state.upgrades.push(...UPGRADES.filter(u=>u.productionShare).map(u=>u.id));
+  const mastered=getStats(state);assert.equal(mastered.clickProductionShare,0.20);
+  assert.equal(mastered.clickPower,mastered.flatClickPower+mastered.cps*0.20);
+  assert.ok(mastered.clickPower*3/mastered.cps>=0.6);
+});
+
+test('teamwork keeps an early resource useful at late stages without recursive or quadratic income',()=>{
+  const state=createState(0);state.generators[0]=100;state.generators[10]=25;
+  const original=getStats(state);
+  state.upgrades=['autoclick-team'];const enhanced=getStats(state);
+  assert.equal(enhanced.teamworkBonus,0.1);assert.equal(enhanced.cps,original.cps*1.1);
+  const cursor=enhanced.generatorRates[0];
+  assert.equal(cursor.teamworkCps,original.cps*0.1);assert.equal(cursor.totalCps,cursor.directCps+cursor.teamworkCps);
+  assert.ok(cursor.totalCps/enhanced.cps>0.09);
+  const rates=enhanced.generatorRates.reduce((sum,rate)=>sum+rate.totalCps,0);
+  assert.ok(Math.abs(rates-enhanced.cps)<enhanced.cps*1e-12);
+  state.generators[0]=200;assert.ok(getStats(state).teamworkBonus<0.14);
+  state.generators[0]=1000000;assert.ok(getStats(state).teamworkBonus<0.2);
+  // Doubling all direct rates and prestige does not multiply the teamwork share again.
+  state.generators[0]=100;state.prestige=10;
+  assert.equal(getStats(state).teamworkBonus,enhanced.teamworkBonus);
+  assert.equal(getStats(state).cps,enhanced.cps*2);
+});
+
+test('new research milestones are earned, affordable, distinct and preserve existing IDs',()=>{
+  const state=createState(0);state.balance=1e25;
+  assert.equal(new Set(UPGRADES.map(u=>u.id)).size,UPGRADES.length);
+  for(const id of ['click-1','click-2','click-3','click-4',...GENERATORS.flatMap(g=>[g.id+'-1',g.id+'-2'])])assert.ok(UPGRADES.some(u=>u.id===id));
+  for(const amount of [50,75,100,150]){
+    const research=UPGRADES.find(u=>u.target==='abacus'&&!u.teamwork&&u.requirement.amount===amount);
+    state.generators[1]=amount-1;
+    assert.throws(()=>applyAction(state,{type:'upgrade',itemId:research.id},0),{code:'upgrade_locked'});
+    state.generators[1]=amount;const previous=getStats(state).cps;
+    applyAction(state,{type:'upgrade',itemId:research.id},0);
+    assert.equal(getStats(state).cps,previous*research.multiplier);
+    assert.ok(research.price<priceFor('abacus',amount,10));
+  }
+  state.generators[1]=49;assert.throws(()=>applyAction(state,{type:'upgrade',itemId:'abacus-team'},0),{code:'upgrade_locked'});
+  state.generators[1]=50;applyAction(state,{type:'upgrade',itemId:'abacus-team'},0);
+  assert.ok(getStats(state).generatorRates[1].teamworkCps>0);
+});
+
+test('late resource payback grows smoothly instead of jumping to ten hours',()=>{
+  const payback=GENERATORS.map(g=>g.basePrice/g.baseCps);
+  assert.ok(payback.every(seconds=>seconds>=60&&seconds<=1500));
+  for(let i=1;i<payback.length;i++)assert.ok(payback[i]/payback[i-1]<2);
+});
+
+test('economy migration credits the pending old interval at old rates, then adopts new rates once',()=>{
+  const state=createState(0);delete state.economyVersion;state.generators[10]=1;state.upgrades=['superintelligence-1'];state.prestige=10;
+  state.balance=100;state.totalEarned=200;state.runEarned=100;
+  const expectedOldRate=240_000_000*2*2;
+  const first=settle(state,40000);
+  assert.equal(first.earned,expectedOldRate*35);assert.equal(first.offlineEarned,expectedOldRate*5);
+  assert.equal(state.balance,100+first.earned);assert.equal(state.totalEarned,200+first.earned);
+  assert.equal(state.economyVersion,2);assert.deepEqual(state.upgrades,['superintelligence-1']);
+  const settled=state.balance;settle(state,40000);assert.equal(state.balance,settled);
+  state.lastSeen=40000;const next=settle(state,50000);
+  assert.equal(next.earned,getStats(state).cps*10);assert.equal(next.offlineEarned,0);
 });

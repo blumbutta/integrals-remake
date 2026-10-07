@@ -26,7 +26,7 @@ jobs:
       - name: Package public game only
         run: |
           mkdir -p public/shared public/assets
-          cp index.html style.css app.mjs music.mjs format.mjs effects.mjs world.mjs research-art.mjs resource-info.mjs cloud-connection.mjs achievement-art.mjs prestige-audio.mjs public/
+          cp index.html style.css layout-refresh.css world-events.css app.mjs music.mjs format.mjs effects.mjs world.mjs research-art.mjs resource-info.mjs cloud-connection.mjs achievement-art.mjs prestige-audio.mjs public/
           cp shared/*.mjs public/shared/
           cp -R assets/. public/assets/
           node server/version-public.mjs public
